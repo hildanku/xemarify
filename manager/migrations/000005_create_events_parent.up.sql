@@ -11,11 +11,6 @@ CREATE TABLE events (
     facility        TEXT,
     severity        TEXT,
     category        TEXT,
-    action          TEXT,
-    status          TEXT,
-
-    rule_id         UUID,
-    level           INT,
 
     message         TEXT NOT NULL,
     normalized      JSONB,
