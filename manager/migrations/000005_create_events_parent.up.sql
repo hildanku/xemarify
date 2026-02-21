@@ -1,0 +1,28 @@
+CREATE TABLE events (
+    id              BIGSERIAL,
+    event_time      TIMESTAMPTZ,
+    received_at     TIMESTAMPTZ NOT NULL,
+
+    agent_id        UUID,
+    hostname        TEXT,
+    source_ip       INET,
+    input_type      TEXT,
+
+    facility        TEXT,
+    severity        TEXT,
+    category        TEXT,
+    action          TEXT,
+    status          TEXT,
+
+    rule_id         UUID,
+    level           INT,
+
+    message         TEXT NOT NULL,
+    normalized      JSONB,
+    raw             TEXT,
+
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    PRIMARY KEY (id, received_at)
+)
+PARTITION BY RANGE (received_at);
