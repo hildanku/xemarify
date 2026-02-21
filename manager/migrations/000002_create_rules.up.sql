@@ -10,7 +10,7 @@ CREATE TABLE rules (
     id          UUID PRIMARY KEY,
     name        TEXT NOT NULL,
     description TEXT,
-    level       severity NOT NULL 
+    level       severity NOT NULL,
     enabled     BOOLEAN NOT NULL DEFAULT TRUE,
     condition   JSONB NOT NULL,
     tags        TEXT[] DEFAULT '{}',
