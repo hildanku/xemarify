@@ -1,0 +1,1 @@
+DROP TABLE correlation_state;
