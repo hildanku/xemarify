@@ -13,6 +13,18 @@ type AppConfig struct {
 	Server   ServerConfig
 }
 
+type DatabaseConfig struct {
+	Host     string
+	Port     int
+	User     string
+	Password string
+	Name     string
+	Schema   string
+	SSLMode  string
+	MaxConns int32
+	MinConns int32
+}
+
 type ServerConfig struct {
 	Host string
 	Port int
