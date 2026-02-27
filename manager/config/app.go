@@ -11,6 +11,7 @@ import (
 type AppConfig struct {
 	Database DatabaseConfig
 	Server   ServerConfig
+	LogLevel string
 }
 
 type DatabaseConfig struct {
@@ -39,6 +40,11 @@ func Load() (*AppConfig, error) {
 		fmt.Println("Warning: .env file not found")
 	}
 
+	logLevel := viper.GetString("LOG_LEVEL")
+	if logLevel == "" {
+		logLevel = "info"
+	}
+
 	appcfg := &AppConfig{
 		Database: DatabaseConfig{
 			Host:     viper.GetString("DB_HOST"),
@@ -55,6 +61,7 @@ func Load() (*AppConfig, error) {
 			Host: viper.GetString("SERVER_HOST"),
 			Port: viper.GetInt("PORT"),
 		},
+		LogLevel: logLevel,
 	}
 	if err := appcfg.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid configuration: %w", err)
