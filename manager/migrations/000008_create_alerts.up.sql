@@ -1,5 +1,5 @@
 CREATE TABLE alerts (
-    id          BIGSERIAL PRIMARY KEY,
+    id          UUID PRIMARY KEY,
     rule_id     UUID NOT NULL,
     severity    TEXT,
     correlation_key TEXT,

@@ -5,7 +5,11 @@ CREATE TABLE correlation_state (
     state_data      JSONB NOT NULL,
     first_seen_at   TIMESTAMPTZ NOT NULL,
     last_seen_at    TIMESTAMPTZ NOT NULL,
-    expires_at      TIMESTAMPTZ NOT NULL
-);
+    expires_at      TIMESTAMPTZ NOT NULL,
 
-UNIQUE (rule_id, correlation_key)
+    UNIQUE (rule_id, correlation_key),
+    
+    FOREIGN KEY (rule_id)
+    REFERENCES rules(id)
+    ON DELETE CASCADE
+);

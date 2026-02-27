@@ -1,5 +1,5 @@
 CREATE TABLE events (
-    id              BIGSERIAL,
+    id              UUID,
     event_time      TIMESTAMPTZ,
     received_at     TIMESTAMPTZ NOT NULL,
 
