@@ -5,7 +5,18 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/hildanku/xemarify/internal/modules/agent/domain"
+	"github.com/hildanku/xemarify/pkg/query"
 )
+
+// ListFilter holds all filter and pagination options for listing agents.
+// It embeds query.BaseFilter for the shared sort/pagination contract, and can be
+// extended with agent-specific fields (e.g. status filter) without touching the
+// shared package.
+type ListFilter struct {
+	query.BaseFilter
+	// Add agent-specific filter fields here when needed.
+	// e.g. Status domain.AgentStatus
+}
 
 // AgentRepository defines the persistence contract for the agent module.
 type AgentRepository interface {
@@ -24,8 +35,9 @@ type AgentRepository interface {
 	// GetByID looks up an agent by its ID. Returns nil if not found.
 	GetByID(ctx context.Context, agentId uuid.UUID) (*domain.Agent, error)
 
-	// List returns all agents in the database.
-	List(ctx context.Context) ([]*domain.Agent, error)
+	// List returns a filtered, sorted, paginated slice of agents together with
+	// the total number of rows that match the filter (ignoring limit/offset).
+	List(ctx context.Context, filter ListFilter) ([]*domain.Agent, int, error)
 
 	// Delete removes an agent from the database by its ID.
 	Delete(ctx context.Context, agentId uuid.UUID) error

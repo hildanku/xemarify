@@ -15,7 +15,9 @@ import (
 	infraLogger "github.com/hildanku/xemarify/internal/infrastructure/logger"
 	"github.com/hildanku/xemarify/internal/infrastructure/metrics"
 	"github.com/hildanku/xemarify/internal/infrastructure/middleware"
+	agentHandler "github.com/hildanku/xemarify/internal/modules/agent/handler"
 	agentRepo "github.com/hildanku/xemarify/internal/modules/agent/repository"
+	agentService "github.com/hildanku/xemarify/internal/modules/agent/service"
 	auditHandler "github.com/hildanku/xemarify/internal/modules/audit/handler"
 	auditRepo "github.com/hildanku/xemarify/internal/modules/audit/repository"
 	auditService "github.com/hildanku/xemarify/internal/modules/audit/service"
@@ -62,6 +64,7 @@ func main() {
 	auditLogRepository := auditRepo.NewPgAuditLogRepository(db)
 
 	// Services
+	agentSvc := agentService.NewAgentService(agentRepository, log)
 	evtService := eventService.NewEventService(eventRepository, agentRepository, m, log)
 	auditLogService := auditService.NewAuditLogService(auditLogRepository, log)
 	authSvc := authService.NewAuthService(userRepository, authRepository, auditLogService, cfg.JWT, log)
@@ -109,6 +112,12 @@ func main() {
 	usersGroup.Use(middleware.RequireRole(userDomain.RoleManager))
 	userHandle := userHandler.NewUserHandler(userSvc, log)
 	userHandle.Register(usersGroup)
+
+	// Agents - Manager only
+	agentsGroup := managerV1.Group("/agents")
+	agentsGroup.Use(middleware.RequireRole(userDomain.RoleManager))
+	agentHandle := agentHandler.NewAgentHandler(agentSvc, log)
+	agentHandle.Register(agentsGroup)
 
 	// Audit Logs - Manager & Analyst
 	auditGroup := managerV1.Group("/audit-logs")

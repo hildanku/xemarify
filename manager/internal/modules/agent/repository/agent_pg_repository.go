@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/subtle"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -116,15 +118,64 @@ func (r *pgAgentRepository) GetByID(ctx context.Context, agentId uuid.UUID) (*do
 	return &a, nil
 }
 
-func (r *pgAgentRepository) List(ctx context.Context) ([]*domain.Agent, error) {
-	const q = `
+func (r *pgAgentRepository) List(ctx context.Context, filter ListFilter) ([]*domain.Agent, int, error) {
+	// Whitelist sortable columns to prevent SQL injection.
+	allowedCols := map[string]string{
+		"name":         "name",
+		"hostname":     "hostname",
+		"status":       "status",
+		"created_at":   "created_at",
+		"last_seen_at": "last_seen_at",
+		"version":      "version",
+	}
+	sortCol, ok := allowedCols[filter.SortBy]
+	if !ok {
+		sortCol = "created_at"
+	}
+
+	direction := "ASC"
+	if strings.EqualFold(string(filter.Order), "desc") {
+		direction = "DESC"
+	}
+
+	limit := 10
+	if filter.Limit > 0 {
+		limit = filter.Limit
+	}
+	offset := 0
+	if filter.Offset > 0 {
+		offset = filter.Offset
+	}
+
+	// Build optional WHERE clause.
+	args := []any{}
+	whereClause := ""
+	if filter.Search != "" {
+		args = append(args, "%"+filter.Search+"%")
+		whereClause = "WHERE (name ILIKE $1 OR hostname ILIKE $1 OR ip_address::text ILIKE $1)"
+	}
+
+	// Total count (ignores limit/offset).
+	countQ := fmt.Sprintf("SELECT COUNT(*) FROM agents %s", whereClause)
+	var total int
+	if err := r.db.QueryRow(ctx, countQ, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	// Paginated data query.
+	nextIdx := len(args) + 1
+	args = append(args, limit, offset)
+	dataQ := fmt.Sprintf(`
 		SELECT id, name, hostname, key, ip_address::text, version, status, created_at, last_seen_at
 		FROM agents
-		ORDER BY created_at DESC
-	`
-	rows, err := r.db.Query(ctx, q)
+		%s
+		ORDER BY %s %s
+		LIMIT $%d OFFSET $%d
+	`, whereClause, sortCol, direction, nextIdx, nextIdx+1)
+
+	rows, err := r.db.Query(ctx, dataQ, args...)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
 
@@ -134,7 +185,7 @@ func (r *pgAgentRepository) List(ctx context.Context) ([]*domain.Agent, error) {
 		var ipAddress *string
 		var lastSeenAt *time.Time
 
-		err := rows.Scan(
+		if err := rows.Scan(
 			&a.ID,
 			&a.Name,
 			&a.Hostname,
@@ -144,20 +195,21 @@ func (r *pgAgentRepository) List(ctx context.Context) ([]*domain.Agent, error) {
 			&a.Status,
 			&a.CreatedAt,
 			&lastSeenAt,
-		)
-		if err != nil {
-			return nil, err
+		); err != nil {
+			return nil, 0, err
 		}
 
 		if ipAddress != nil {
 			a.IPAddress = *ipAddress
 		}
 		a.LastSeenAt = lastSeenAt
-
 		agents = append(agents, &a)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
 
-	return agents, nil
+	return agents, total, nil
 }
 
 func (r *pgAgentRepository) Create(ctx context.Context, a *domain.Agent) error {
