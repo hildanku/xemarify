@@ -4,6 +4,7 @@ package config
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/spf13/viper"
 )
@@ -11,7 +12,14 @@ import (
 type AppConfig struct {
 	Database DatabaseConfig
 	Server   ServerConfig
+	JWT      JWTConfig
 	LogLevel string
+}
+
+type JWTConfig struct {
+	Secret          string
+	AccessTokenTTL  time.Duration
+	RefreshTokenTTL time.Duration
 }
 
 type DatabaseConfig struct {
@@ -61,6 +69,11 @@ func Load() (*AppConfig, error) {
 			Host: viper.GetString("SERVER_HOST"),
 			Port: viper.GetInt("PORT"),
 		},
+		JWT: JWTConfig{
+			Secret:          viper.GetString("JWT_SECRET"),
+			AccessTokenTTL:  parseDurationOrDefault(viper.GetString("JWT_ACCESS_TTL"), 15*time.Minute),
+			RefreshTokenTTL: parseDurationOrDefault(viper.GetString("JWT_REFRESH_TTL"), 7*24*time.Hour),
+		},
 		LogLevel: logLevel,
 	}
 	if err := appcfg.Validate(); err != nil {
@@ -85,5 +98,21 @@ func (c *AppConfig) Validate() error {
 	if c.Server.Port < 1 || c.Server.Port > 65535 {
 		return fmt.Errorf("invalid server port: %d", c.Server.Port)
 	}
+
+	if c.JWT.Secret == "" {
+		return fmt.Errorf("JWT secret is required (JWT_SECRET)")
+	}
+
 	return nil
+}
+
+func parseDurationOrDefault(s string, fallback time.Duration) time.Duration {
+	if s == "" {
+		return fallback
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return fallback
+	}
+	return d
 }
