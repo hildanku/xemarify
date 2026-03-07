@@ -7,8 +7,11 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/hildanku/xemarify/internal/infrastructure/metrics"
 	"github.com/hildanku/xemarify/internal/infrastructure/middleware"
+	eventRepo "github.com/hildanku/xemarify/internal/modules/event/repository"
 	"github.com/hildanku/xemarify/internal/modules/event/service"
 	"github.com/hildanku/xemarify/internal/modules/event/transport"
+	"github.com/hildanku/xemarify/pkg/query"
+	"github.com/hildanku/xemarify/pkg/response"
 	"github.com/sirupsen/logrus"
 )
 
@@ -30,6 +33,11 @@ func NewEventHandler(svc *service.EventService, m *metrics.Metrics, log *logrus.
 // Expected to be called with a group that already has auth + rate-limit middleware applied.
 func (h *EventHandler) Register(rg *gin.RouterGroup) {
 	rg.POST("/events", h.Ingest)
+}
+
+// RegisterManager wires read-only event routes onto a manager-auth group.
+func (h *EventHandler) RegisterManager(rg *gin.RouterGroup) {
+	rg.GET("", h.List)
 }
 
 // Ingest handles POST /api/v1/events.
@@ -73,5 +81,74 @@ func (h *EventHandler) Ingest(c *gin.Context) {
 	c.JSON(http.StatusAccepted, gin.H{
 		"event_id":    event.ID,
 		"received_at": event.ReceivedAt,
+	})
+}
+
+// List handles GET /api/v1/events (manager-only).
+//
+// Query params:
+//
+//	search    - case-insensitive partial match on hostname, severity, category (indexed columns only)
+//	sort_by   - field to sort by (received_at|event_time|hostname|severity|category|created_at); default: received_at
+//	order     - sort direction (asc|desc); default: desc
+//	limit     - max rows (1-100); default: 10
+//	offset    - rows to skip; default: 0
+//	date_from - ISO-8601 lower bound on received_at; default: NOW()-24h (for partition pruning)
+//	date_to   - ISO-8601 upper bound on received_at; default: NOW()
+//	agent_id  - filter by agent UUID (optional)
+//	severity  - exact severity filter (optional)
+//	category  - exact category filter (optional)
+func (h *EventHandler) List(c *gin.Context) {
+	var q transport.ListEventsQuery
+	if err := c.ShouldBindQuery(&q); err != nil {
+		response.Write(c, http.StatusBadRequest, err.Error(), nil)
+		return
+	}
+
+	var agentID *string
+	if q.AgentID != "" {
+		agentID = &q.AgentID
+	}
+
+	filter := eventRepo.ListFilter{
+		BaseFilter: query.BaseFilter{
+			Search: q.Search,
+			SortBy: q.SortBy,
+			Order:  query.SortOrder(q.Order),
+			Limit:  q.Limit,
+			Offset: q.Offset,
+		},
+		DateFrom: q.DateFrom,
+		DateTo:   q.DateTo,
+		AgentID:  agentID,
+		Severity: q.Severity,
+		Category: q.Category,
+	}
+
+	events, total, err := h.svc.List(c.Request.Context(), filter)
+	if err != nil {
+		h.log.WithError(err).Error("failed to list events")
+		response.Write(c, http.StatusInternalServerError, "internal server error", nil)
+		return
+	}
+
+	items := make([]*transport.EventResponse, 0, len(events))
+	for _, e := range events {
+		items = append(items, transport.ToEventResponse(e))
+	}
+
+	totalPages := 0
+	if filter.Limit > 0 {
+		totalPages = (total + filter.Limit - 1) / filter.Limit
+	}
+
+	response.Write(c, http.StatusOK, "events retrieved", transport.ListEventsResponse{
+		Items: items,
+		Metadata: transport.ListEventsMetadata{
+			Total:      total,
+			TotalPages: totalPages,
+			Limit:      filter.Limit,
+			Offset:     filter.Offset,
+		},
 	})
 }

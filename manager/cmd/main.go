@@ -125,6 +125,11 @@ func main() {
 	auditHandle := auditHandler.NewAuditLogHandler(auditLogService, log)
 	auditHandle.Register(auditGroup)
 
+	// Events read (list) - Manager & Analyst
+	eventsGroup := managerV1.Group("/events")
+	eventsGroup.Use(middleware.RequireRole(userDomain.RoleManager, userDomain.RoleAnalyst))
+	evtHandler.RegisterManager(eventsGroup)
+
 	// Http Server with graceful shutdown
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	srv := &http.Server{

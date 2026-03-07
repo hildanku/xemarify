@@ -128,3 +128,9 @@ func (s *EventService) normalize(e *domain.Event) {
 		e.Normalized["facility"] = e.Facility
 	}
 }
+
+// List returns a filtered, sorted, paginated slice of events and the total
+// match count within the requested date window.
+func (s *EventService) List(ctx context.Context, filter eventRepo.ListFilter) ([]*domain.Event, int, error) {
+	return s.eventRepo.List(ctx, filter)
+}
