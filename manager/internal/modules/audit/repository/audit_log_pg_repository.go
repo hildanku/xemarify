@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/hildanku/xemarify/internal/modules/audit/domain"
@@ -45,42 +47,63 @@ func (r *pgAuditLogRepository) Create(ctx context.Context, e *domain.AuditLog) e
 }
 
 func (r *pgAuditLogRepository) List(ctx context.Context, f ListFilter) ([]*domain.AuditLog, int, error) {
-	// Default pagination
-	if f.Page < 1 {
-		f.Page = 1
+	allowedCols := map[string]string{
+		"action":          "action",
+		"user_identifier": "user_identifier",
+		"created_at":      "created_at",
 	}
-	if f.PageSize < 1 {
-		f.PageSize = 20
+	sortCol, ok := allowedCols[f.SortBy]
+	if !ok {
+		sortCol = "created_at"
 	}
-	offset := (f.Page - 1) * f.PageSize
 
-	// Nullify empty action string so the filter is skipped in SQL
+	direction := "DESC"
+	if strings.EqualFold(string(f.Order), "asc") {
+		direction = "ASC"
+	}
+
+	limit := 10
+	if f.Limit > 0 {
+		limit = f.Limit
+	}
+	offset := 0
+	if f.Offset > 0 {
+		offset = f.Offset
+	}
+
+	// Nullify empty action/search so the filter is skipped in SQL.
 	var actionFilter *string
 	if f.Action != "" {
 		actionFilter = &f.Action
 	}
+	var searchFilter *string
+	if f.Search != "" {
+		searchFilter = &f.Search
+	}
 
-	const countQ = `
-		SELECT COUNT(*) FROM audit_logs
+	baseWhere := `
 		WHERE ($1::VARCHAR IS NULL OR action = $1)
 		  AND ($2::TIMESTAMP IS NULL OR created_at >= $2)
 		  AND ($3::TIMESTAMP IS NULL OR created_at <= $3)
+		  AND ($4::VARCHAR IS NULL OR action ILIKE '%' || $4 || '%'
+		       OR user_identifier ILIKE '%' || $4 || '%')
 	`
+
+	countQ := fmt.Sprintf("SELECT COUNT(*) FROM audit_logs %s", baseWhere)
 	var total int
-	if err := r.db.QueryRow(ctx, countQ, actionFilter, f.DateFrom, f.DateTo).Scan(&total); err != nil {
+	if err := r.db.QueryRow(ctx, countQ, actionFilter, f.DateFrom, f.DateTo, searchFilter).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 
-	const listQ = `
+	listQ := fmt.Sprintf(`
 		SELECT id, user_id, user_identifier, action, object_type, object_id, metadata, created_at
 		FROM audit_logs
-		WHERE ($1::VARCHAR IS NULL OR action = $1)
-		  AND ($2::TIMESTAMP IS NULL OR created_at >= $2)
-		  AND ($3::TIMESTAMP IS NULL OR created_at <= $3)
-		ORDER BY created_at DESC
-		LIMIT $4 OFFSET $5
-	`
-	rows, err := r.db.Query(ctx, listQ, actionFilter, f.DateFrom, f.DateTo, f.PageSize, offset)
+		%s
+		ORDER BY %s %s
+		LIMIT $5 OFFSET $6
+	`, baseWhere, sortCol, direction)
+
+	rows, err := r.db.Query(ctx, listQ, actionFilter, f.DateFrom, f.DateTo, searchFilter, limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -93,6 +116,9 @@ func (r *pgAuditLogRepository) List(ctx context.Context, f ListFilter) ([]*domai
 			return nil, 0, err
 		}
 		logs = append(logs, entry)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
 	}
 	return logs, total, nil
 }

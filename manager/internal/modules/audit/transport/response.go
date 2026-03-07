@@ -19,12 +19,18 @@ type AuditLogResponse struct {
 	CreatedAt      time.Time              `json:"created_at"`
 }
 
+// AuditLogListMetadata carries pagination and count info for a list response.
+type AuditLogListMetadata struct {
+	Total      int `json:"total"`
+	TotalPages int `json:"total_pages"`
+	Limit      int `json:"limit"`
+	Offset     int `json:"offset"`
+}
+
 // AuditLogListResponse wraps a paginated list of audit log entries.
 type AuditLogListResponse struct {
-	Items    []*AuditLogResponse `json:"items"`
-	Total    int                 `json:"total"`
-	Page     int                 `json:"page"`
-	PageSize int                 `json:"page_size"`
+	Items    []*AuditLogResponse  `json:"items"`
+	Metadata AuditLogListMetadata `json:"metadata"`
 }
 
 // ToAuditLogResponse converts a domain AuditLog to its HTTP response form.

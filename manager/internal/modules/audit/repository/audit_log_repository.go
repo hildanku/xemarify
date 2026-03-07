@@ -5,15 +5,23 @@ import (
 	"time"
 
 	"github.com/hildanku/xemarify/internal/modules/audit/domain"
+	"github.com/hildanku/xemarify/pkg/query"
 )
 
-// ListFilter holds optional filters and pagination for audit log listing.
+// ListFilter holds filter and pagination options for listing audit logs.
+// It embeds query.BaseFilter for the shared sort/pagination contract and adds
+// audit-specific filters (Action, DateFrom, DateTo).
 type ListFilter struct {
-	Action   string
+	query.BaseFilter
+
+	// Action filters by exact action string (optional).
+	Action string
+
+	// DateFrom filters entries created on or after this time (optional).
 	DateFrom *time.Time
-	DateTo   *time.Time
-	Page     int
-	PageSize int
+
+	// DateTo filters entries created on or before this time (optional).
+	DateTo *time.Time
 }
 
 // AuditLogRepository defines the persistence contract for audit logs.
