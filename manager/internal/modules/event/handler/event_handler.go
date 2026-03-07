@@ -93,7 +93,7 @@ func (h *EventHandler) Ingest(c *gin.Context) {
 //	order     - sort direction (asc|desc); default: desc
 //	limit     - max rows (1-100); default: 10
 //	offset    - rows to skip; default: 0
-//	date_from - ISO-8601 lower bound on received_at; default: NOW()-24h (for partition pruning)
+//	date_from - ISO-8601 lower bound on received_at; default: NOW()-30d (for partition pruning)
 //	date_to   - ISO-8601 upper bound on received_at; default: NOW()
 //	agent_id  - filter by agent UUID (optional)
 //	severity  - exact severity filter (optional)

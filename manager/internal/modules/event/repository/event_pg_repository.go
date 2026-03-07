@@ -93,9 +93,9 @@ func (r *pgEventRepository) List(ctx context.Context, f ListFilter) ([]*domain.E
 		offset = f.Offset
 	}
 
-	// Default date window: last 24 h. Keeps partition pruning effective.
+	// Default date window: last 30 days. Keeps partition pruning effective.
 	now := time.Now().UTC()
-	dateFrom := now.Add(-24 * time.Hour)
+	dateFrom := now.Add(-30 * 24 * time.Hour)
 	if f.DateFrom != nil {
 		dateFrom = *f.DateFrom
 	}

@@ -37,7 +37,7 @@ type ListEventsQuery struct {
 	Offset int `form:"offset,default=0" binding:"omitempty,min=0"`
 
 	// DateFrom restricts results to events received on or after this time.
-	// Defaults to NOW()-24h server-side. Drives partition pruning.
+	// Defaults to NOW()-30d server-side. Drives partition pruning.
 	DateFrom *time.Time `form:"date_from" time_format:"2006-01-02T15:04:05Z07:00"`
 
 	// DateTo restricts results to events received on or before this time.
