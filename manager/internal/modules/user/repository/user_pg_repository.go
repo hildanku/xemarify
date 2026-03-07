@@ -3,6 +3,8 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -49,15 +51,58 @@ func (r *pgUserRepository) GetByEmail(ctx context.Context, email string) (*domai
 	return r.scanOne(r.db.QueryRow(ctx, q, email))
 }
 
-func (r *pgUserRepository) List(ctx context.Context) ([]*domain.User, error) {
-	const q = `
+func (r *pgUserRepository) List(ctx context.Context, f ListFilter) ([]*domain.User, int, error) {
+	allowedCols := map[string]string{
+		"username":   "username",
+		"email":      "email",
+		"role":       "role",
+		"created_at": "created_at",
+	}
+	sortCol, ok := allowedCols[f.SortBy]
+	if !ok {
+		sortCol = "created_at"
+	}
+
+	direction := "ASC"
+	if strings.EqualFold(string(f.Order), "desc") {
+		direction = "DESC"
+	}
+
+	limit := 10
+	if f.Limit > 0 {
+		limit = f.Limit
+	}
+	offset := 0
+	if f.Offset > 0 {
+		offset = f.Offset
+	}
+
+	args := []any{}
+	whereClause := ""
+	if f.Search != "" {
+		args = append(args, "%"+f.Search+"%")
+		whereClause = "WHERE (username ILIKE $1 OR email ILIKE $1)"
+	}
+
+	var total int
+	countQ := fmt.Sprintf("SELECT COUNT(*) FROM users %s", whereClause)
+	if err := r.db.QueryRow(ctx, countQ, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	nextIdx := len(args) + 1
+	args = append(args, limit, offset)
+	dataQ := fmt.Sprintf(`
 		SELECT id, username, email, role, avatar, created_at, updated_at
 		FROM users
-		ORDER BY created_at DESC
-	`
-	rows, err := r.db.Query(ctx, q)
+		%s
+		ORDER BY %s %s
+		LIMIT $%d OFFSET $%d
+	`, whereClause, sortCol, direction, nextIdx, nextIdx+1)
+
+	rows, err := r.db.Query(ctx, dataQ, args...)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
 
@@ -65,11 +110,14 @@ func (r *pgUserRepository) List(ctx context.Context) ([]*domain.User, error) {
 	for rows.Next() {
 		u, err := r.scanRow(rows)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		users = append(users, u)
 	}
-	return users, nil
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	return users, total, nil
 }
 
 func (r *pgUserRepository) Update(ctx context.Context, u *domain.User) error {

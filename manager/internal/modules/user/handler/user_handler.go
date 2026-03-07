@@ -7,8 +7,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/hildanku/xemarify/internal/infrastructure/middleware"
+	userRepo "github.com/hildanku/xemarify/internal/modules/user/repository"
 	"github.com/hildanku/xemarify/internal/modules/user/service"
 	"github.com/hildanku/xemarify/internal/modules/user/transport"
+	"github.com/hildanku/xemarify/pkg/query"
 	"github.com/hildanku/xemarify/pkg/response"
 	"github.com/sirupsen/logrus"
 )
@@ -35,8 +37,32 @@ func (h *UserHandler) Register(rg *gin.RouterGroup) {
 }
 
 // List handles GET /api/v1/users.
+//
+// Query params:
+//
+//	search   - case-insensitive partial match on username and email
+//	sort_by  - field to sort by (username|email|role|created_at); default: created_at
+//	order    - sort direction (asc|desc); default: asc
+//	limit    - max rows (1-100); default: 10
+//	offset   - rows to skip; default: 0
 func (h *UserHandler) List(c *gin.Context) {
-	users, err := h.svc.List(c.Request.Context())
+	var q transport.ListUsersQuery
+	if err := c.ShouldBindQuery(&q); err != nil {
+		response.Write(c, http.StatusBadRequest, err.Error(), nil)
+		return
+	}
+
+	filter := userRepo.ListFilter{
+		BaseFilter: query.BaseFilter{
+			Search: q.Search,
+			SortBy: q.SortBy,
+			Order:  query.SortOrder(q.Order),
+			Limit:  q.Limit,
+			Offset: q.Offset,
+		},
+	}
+
+	users, total, err := h.svc.List(c.Request.Context(), filter)
 	if err != nil {
 		h.log.WithError(err).Error("failed to list users")
 		response.Write(c, http.StatusInternalServerError, "internal server error", nil)
@@ -47,7 +73,21 @@ func (h *UserHandler) List(c *gin.Context) {
 	for _, u := range users {
 		items = append(items, transport.ToUserResponse(u))
 	}
-	response.Write(c, http.StatusOK, "users retrieved", items)
+
+	totalPages := 0
+	if filter.Limit > 0 {
+		totalPages = (total + filter.Limit - 1) / filter.Limit
+	}
+
+	response.Write(c, http.StatusOK, "users retrieved", transport.ListUsersResponse{
+		Items: items,
+		Metadata: transport.ListUsersMetadata{
+			Total:      total,
+			TotalPages: totalPages,
+			Limit:      filter.Limit,
+			Offset:     filter.Offset,
+		},
+	})
 }
 
 // Create handles POST /api/v1/users.

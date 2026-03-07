@@ -208,9 +208,9 @@ func (s *UserService) GetByID(ctx context.Context, id uuid.UUID) (*domain.User, 
 	return u, nil
 }
 
-// List returns all users.
-func (s *UserService) List(ctx context.Context) ([]*domain.User, error) {
-	return s.userRepo.List(ctx)
+// List returns a filtered, sorted, paginated list of users and the total match count.
+func (s *UserService) List(ctx context.Context, filter userRepo.ListFilter) ([]*domain.User, int, error) {
+	return s.userRepo.List(ctx, filter)
 }
 
 func strPtr(s string) *string { return &s }

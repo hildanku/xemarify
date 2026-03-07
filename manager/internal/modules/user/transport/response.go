@@ -18,6 +18,20 @@ type UserResponse struct {
 	UpdatedAt *time.Time `json:"updated_at,omitempty"`
 }
 
+// ListUsersMetadata carries pagination and count information for a list response.
+type ListUsersMetadata struct {
+	Total      int `json:"total"`
+	TotalPages int `json:"total_pages"`
+	Limit      int `json:"limit"`
+	Offset     int `json:"offset"`
+}
+
+// ListUsersResponse wraps a paginated list of users with metadata.
+type ListUsersResponse struct {
+	Items    []*UserResponse   `json:"items"`
+	Metadata ListUsersMetadata `json:"metadata"`
+}
+
 // ToUserResponse converts a domain User to its HTTP response representation.
 func ToUserResponse(u *domain.User) *UserResponse {
 	return &UserResponse{
