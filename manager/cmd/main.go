@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/hildanku/xemarify/config"
 	infraLogger "github.com/hildanku/xemarify/internal/infrastructure/logger"
@@ -77,6 +78,7 @@ func main() {
 
 	router := gin.New()
 	router.Use(gin.Recovery())
+	router.Use(cors.Default())
 
 	// Public endpoints
 	router.GET("/health", func(c *gin.Context) {
