@@ -23,7 +23,7 @@ export async function clientFetch<T>(url: string, options?: RequestInit): Promis
     if (token) {
         headers.set('Authorization', `Bearer ${token}`)
     }
-    
+
     const response = await fetch(url, {
         ...options,
         headers: {

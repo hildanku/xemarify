@@ -37,7 +37,7 @@
         },
         onSuccess: (data) => {
             console.log('Login successful:', data)
-            goto(resolve('/dashboard/agents'))
+            goto(resolve('/management'))
         },
         onError: (error) => {
             console.error('Login failed:', error)
