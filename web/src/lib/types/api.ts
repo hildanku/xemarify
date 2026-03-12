@@ -17,3 +17,30 @@ export interface UpsertAgentRequest {
     ip_address?: string
     version?: string
 }
+
+export type UserRole = 'MANAGER' | 'ANALYST' | 'VIEWER'
+
+export interface User {
+    id: string
+    username: string
+    email: string
+    role: UserRole
+    avatar?: string | null
+    created_at: string
+    updated_at?: string | null
+}
+
+export interface CreateUserRequest {
+    username: string
+    email: string
+    role: UserRole
+    password: string
+    avatar?: string
+}
+
+export interface UpdateUserRequest {
+    username?: string
+    email?: string
+    role?: UserRole
+    avatar?: string | null
+}
