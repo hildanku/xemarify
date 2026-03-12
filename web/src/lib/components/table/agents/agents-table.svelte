@@ -205,7 +205,7 @@
 							/>
 						{:else if header.column.getCanSort()}
 							<button
-								class="flex items-center gap-1 text-xs font-medium hover:text-foreground transition-colors -ml-1 px-1 py-0.5 rounded hover:bg-muted"
+								class="flex items-center gap-1 text-sm font-medium hover:text-foreground transition-colors -ml-1 px-1 py-0.5 rounded hover:bg-muted"
 								onclick={header.column.getToggleSortingHandler()}
 							>
 								<FlexRender
