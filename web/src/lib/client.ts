@@ -24,12 +24,11 @@ export async function clientFetch<T>(url: string, options?: RequestInit): Promis
         headers.set('Authorization', `Bearer ${token}`)
     }
 
+    headers.set('Content-Type', 'application/json')
+
     const response = await fetch(url, {
         ...options,
-        headers: {
-            'Content-Type': 'application/json',
-            ...headers,
-        },
+        headers,
     })
 
     if (!response.ok) {

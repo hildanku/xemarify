@@ -3,6 +3,7 @@
 	import favicon from '$lib/assets/favicon.svg'
 	import { QueryClient, QueryClientProvider } from '@tanstack/svelte-query'
 	import { browser } from '$app/environment'
+	import { Toaster } from '$lib/components/ui/sonner'
 
 	let { children } = $props()
 	const queryClient = new QueryClient({
@@ -20,4 +21,5 @@
 
 <QueryClientProvider client={queryClient}>
 	{@render children?.()}
+	<Toaster richColors position="bottom-right" />
 </QueryClientProvider>
