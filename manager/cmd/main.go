@@ -78,7 +78,19 @@ func main() {
 
 	router := gin.New()
 	router.Use(gin.Recovery())
-	router.Use(cors.Default())
+
+	// CORS: allow everything in development (LOG_LEVEL=debug), restrict in production
+	if cfg.LogLevel == "debug" {
+		router.Use(cors.New(cors.Config{
+			AllowAllOrigins:  true,
+			AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+			AllowHeaders:     []string{"*"},
+			ExposeHeaders:    []string{"Content-Length"},
+			AllowCredentials: false,
+		}))
+	} else {
+		router.Use(cors.Default())
+	}
 
 	// Public endpoints
 	router.GET("/health", func(c *gin.Context) {
