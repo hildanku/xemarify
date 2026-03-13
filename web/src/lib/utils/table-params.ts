@@ -71,6 +71,32 @@ export function updateTableParams(
 }
 
 /**
+ * Update arbitrary URL search params and navigate without full page reload.
+ */
+export function updateSearchParams(
+    params: Record<string, string | undefined>,
+    currentUrl: URL,
+    options?: { resetPage?: boolean },
+): void {
+    const url = new URL(currentUrl.toString())
+
+    for (const [key, value] of Object.entries(params)) {
+        if (value === undefined) continue
+        if (value) {
+            url.searchParams.set(key, value)
+        } else {
+            url.searchParams.delete(key)
+        }
+    }
+
+    if (options?.resetPage) {
+        url.searchParams.set('page', '1')
+    }
+
+    goto(`${base}${url.pathname}${url.search}`, { replaceState: true, noScroll: true, keepFocus: true })
+}
+
+/**
  * Serialize table params into a query string for the API request.
  */
 export function buildQueryString(params: TableParams): string {

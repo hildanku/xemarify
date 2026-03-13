@@ -44,3 +44,79 @@ export interface UpdateUserRequest {
     role?: UserRole
     avatar?: string | null
 }
+
+export type RuleSeverity = 'INFO' | 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
+
+export type AlertStatus = 'new' | 'acknowledged' | 'closed'
+
+export interface RuleCondition {
+    event_type: string
+    group_by: string[]
+    threshold: number
+    window_sec: number
+    severity?: RuleSeverity
+}
+
+export interface Rule {
+    id: string
+    name: string
+    description?: string
+    level: RuleSeverity
+    enabled: boolean
+    condition: RuleCondition
+    tags: string[]
+    version: number
+    created_by?: string
+    created_at: string
+    updated_at: string
+}
+
+export interface CreateRuleRequest {
+    name: string
+    description?: string
+    level: RuleSeverity
+    enabled: boolean
+    condition: RuleCondition
+    tags?: string[]
+}
+
+export interface UpdateRuleRequest {
+    name?: string
+    description?: string
+    level?: RuleSeverity
+    enabled?: boolean
+    condition?: RuleCondition
+    tags?: string[]
+}
+
+export interface Alert {
+    id: string
+    rule_id: string
+    rule_name: string
+    severity: RuleSeverity
+    correlation_key: string
+    triggered_at: string
+    status: AlertStatus
+    created_at: string
+}
+
+export interface AlertEvent {
+    id: string
+    event_time: string
+    received_at: string
+    agent_id: string
+    hostname?: string
+    source_ip?: string
+    input_type?: string
+    facility?: string
+    severity?: string
+    category?: string
+    message: string
+    normalized?: Record<string, unknown>
+    raw?: string
+}
+
+export interface AlertDetail {
+    alert: Alert
+    events: AlertEvent[]
+}
