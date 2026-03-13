@@ -20,6 +20,9 @@ import (
 	agentHandler "github.com/hildanku/xemarify/internal/modules/agent/handler"
 	agentRepo "github.com/hildanku/xemarify/internal/modules/agent/repository"
 	agentService "github.com/hildanku/xemarify/internal/modules/agent/service"
+	alertHandler "github.com/hildanku/xemarify/internal/modules/alert/handler"
+	alertRepo "github.com/hildanku/xemarify/internal/modules/alert/repository"
+	alertService "github.com/hildanku/xemarify/internal/modules/alert/service"
 	auditHandler "github.com/hildanku/xemarify/internal/modules/audit/handler"
 	auditRepo "github.com/hildanku/xemarify/internal/modules/audit/repository"
 	auditService "github.com/hildanku/xemarify/internal/modules/audit/service"
@@ -68,6 +71,7 @@ func main() {
 	authRepository := authRepo.NewPgAuthRepository(db)
 	auditLogRepository := auditRepo.NewPgAuditLogRepository(db)
 	ruleRepository := ruleRepo.NewPgRuleRepository(db)
+	alertRepository := alertRepo.NewPgAlertRepository(db)
 
 	// Services
 	agentSvc := agentService.NewAgentService(agentRepository, log)
@@ -81,7 +85,8 @@ func main() {
 	auditLogService := auditService.NewAuditLogService(auditLogRepository, log)
 	authSvc := authService.NewAuthService(userRepository, authRepository, auditLogService, cfg.JWT, log)
 	userSvc := userService.NewUserService(db, userRepository, auditLogService, log)
-	ruleSvc := ruleService.NewRuleService(ruleRepository, log)
+	ruleSvc := ruleService.NewRuleService(ruleRepository, ruleEngine, log)
+	alertSvc := alertService.NewAlertService(alertRepository, log)
 
 	// HTTP router
 	if cfg.LogLevel != "debug" {
@@ -161,6 +166,12 @@ func main() {
 	rulesGroup.Use(middleware.RequireRole(userDomain.RoleManager))
 	ruleHandle := ruleHandler.NewRuleHandler(ruleSvc, log)
 	ruleHandle.Register(rulesGroup)
+
+	// Alerts - Manager & Analyst
+	alertsGroup := managerV1.Group("/alerts")
+	alertsGroup.Use(middleware.RequireRole(userDomain.RoleManager, userDomain.RoleAnalyst))
+	alertHandle := alertHandler.NewAlertHandler(alertSvc, log)
+	alertHandle.Register(alertsGroup)
 
 	// Http Server with graceful shutdown
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
