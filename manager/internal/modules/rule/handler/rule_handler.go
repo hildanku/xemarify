@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -120,6 +121,10 @@ func (h *RuleHandler) Create(c *gin.Context) {
 		Tags: tags,
 	})
 	if err != nil {
+		if errors.Is(err, ruleService.ErrInvalidRuleCondition) {
+			response.Write(c, http.StatusBadRequest, err.Error(), nil)
+			return
+		}
 		h.log.WithError(err).Error("failed to create rule")
 		response.Write(c, http.StatusInternalServerError, "internal server error", nil)
 		return
@@ -184,6 +189,10 @@ func (h *RuleHandler) Update(c *gin.Context) {
 
 	r, err := h.svc.Update(c.Request.Context(), id, input)
 	if err != nil {
+		if errors.Is(err, ruleService.ErrInvalidRuleCondition) {
+			response.Write(c, http.StatusBadRequest, err.Error(), nil)
+			return
+		}
 		h.log.WithError(err).Error("failed to update rule")
 		response.Write(c, http.StatusInternalServerError, "internal server error", nil)
 		return
