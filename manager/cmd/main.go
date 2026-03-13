@@ -13,6 +13,7 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/hildanku/xemarify/config"
+	"github.com/hildanku/xemarify/internal/engine"
 	infraLogger "github.com/hildanku/xemarify/internal/infrastructure/logger"
 	"github.com/hildanku/xemarify/internal/infrastructure/metrics"
 	"github.com/hildanku/xemarify/internal/infrastructure/middleware"
@@ -63,13 +64,21 @@ func main() {
 	userRepository := userRepo.NewPgUserRepository(db)
 	authRepository := authRepo.NewPgAuthRepository(db)
 	auditLogRepository := auditRepo.NewPgAuditLogRepository(db)
+	// ruleRepository := ruleRepo.NewPgRuleRepository(db)
 
 	// Services
 	agentSvc := agentService.NewAgentService(agentRepository, log)
-	evtService := eventService.NewEventService(eventRepository, agentRepository, m, log)
+	ruleEngine, err := engine.NewRuleEngine(context.Background(), db, log)
+	if err != nil {
+		log.WithError(err).Fatal("failed to initialize rule engine")
+	}
+	defer ruleEngine.Stop()
+
+	evtService := eventService.NewEventService(eventRepository, agentRepository, ruleEngine, m, log)
 	auditLogService := auditService.NewAuditLogService(auditLogRepository, log)
 	authSvc := authService.NewAuthService(userRepository, authRepository, auditLogService, cfg.JWT, log)
 	userSvc := userService.NewUserService(db, userRepository, auditLogService, log)
+	// ruleSvc := ruleService.NewRuleService(ruleRepository, log)
 
 	// HTTP router
 	if cfg.LogLevel != "debug" {
@@ -143,6 +152,12 @@ func main() {
 	eventsGroup := managerV1.Group("/events")
 	eventsGroup.Use(middleware.RequireRole(userDomain.RoleManager, userDomain.RoleAnalyst))
 	evtHandler.RegisterManager(eventsGroup)
+
+	// Detection Rules - Manager only
+	// rulesGroup := managerV1.Group("/rules")
+	// rulesGroup.Use(middleware.RequireRole(userDomain.RoleManager))
+	// ruleHandle := ruleHandler.NewRuleHandler(ruleSvc, log)
+	// ruleHandle.Register(rulesGroup)
 
 	// Http Server with graceful shutdown
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
