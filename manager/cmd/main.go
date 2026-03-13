@@ -29,6 +29,9 @@ import (
 	eventHandler "github.com/hildanku/xemarify/internal/modules/event/handler"
 	eventRepo "github.com/hildanku/xemarify/internal/modules/event/repository"
 	eventService "github.com/hildanku/xemarify/internal/modules/event/service"
+	ruleHandler "github.com/hildanku/xemarify/internal/modules/rule/handler"
+	ruleRepo "github.com/hildanku/xemarify/internal/modules/rule/repository"
+	ruleService "github.com/hildanku/xemarify/internal/modules/rule/service"
 	userDomain "github.com/hildanku/xemarify/internal/modules/user/domain"
 	userHandler "github.com/hildanku/xemarify/internal/modules/user/handler"
 	userRepo "github.com/hildanku/xemarify/internal/modules/user/repository"
@@ -64,7 +67,7 @@ func main() {
 	userRepository := userRepo.NewPgUserRepository(db)
 	authRepository := authRepo.NewPgAuthRepository(db)
 	auditLogRepository := auditRepo.NewPgAuditLogRepository(db)
-	// ruleRepository := ruleRepo.NewPgRuleRepository(db)
+	ruleRepository := ruleRepo.NewPgRuleRepository(db)
 
 	// Services
 	agentSvc := agentService.NewAgentService(agentRepository, log)
@@ -78,7 +81,7 @@ func main() {
 	auditLogService := auditService.NewAuditLogService(auditLogRepository, log)
 	authSvc := authService.NewAuthService(userRepository, authRepository, auditLogService, cfg.JWT, log)
 	userSvc := userService.NewUserService(db, userRepository, auditLogService, log)
-	// ruleSvc := ruleService.NewRuleService(ruleRepository, log)
+	ruleSvc := ruleService.NewRuleService(ruleRepository, log)
 
 	// HTTP router
 	if cfg.LogLevel != "debug" {
@@ -154,10 +157,10 @@ func main() {
 	evtHandler.RegisterManager(eventsGroup)
 
 	// Detection Rules - Manager only
-	// rulesGroup := managerV1.Group("/rules")
-	// rulesGroup.Use(middleware.RequireRole(userDomain.RoleManager))
-	// ruleHandle := ruleHandler.NewRuleHandler(ruleSvc, log)
-	// ruleHandle.Register(rulesGroup)
+	rulesGroup := managerV1.Group("/rules")
+	rulesGroup.Use(middleware.RequireRole(userDomain.RoleManager))
+	ruleHandle := ruleHandler.NewRuleHandler(ruleSvc, log)
+	ruleHandle.Register(rulesGroup)
 
 	// Http Server with graceful shutdown
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)

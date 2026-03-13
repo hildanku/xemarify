@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/hildanku/xemarify/internal/engine"
 	"github.com/hildanku/xemarify/internal/infrastructure/metrics"
 	agentRepo "github.com/hildanku/xemarify/internal/modules/agent/repository"
 	"github.com/hildanku/xemarify/internal/modules/event/domain"
@@ -20,6 +21,7 @@ import (
 type EventService struct {
 	eventRepo eventRepo.EventRepository
 	agentRepo agentRepo.AgentRepository
+	engine    engine.Engine
 	metrics   *metrics.Metrics
 	log       *logrus.Logger
 }
@@ -28,12 +30,14 @@ type EventService struct {
 func NewEventService(
 	eventRepo eventRepo.EventRepository,
 	agentRepo agentRepo.AgentRepository,
+	detectionEngine engine.Engine,
 	m *metrics.Metrics,
 	log *logrus.Logger,
 ) *EventService {
 	return &EventService{
 		eventRepo: eventRepo,
 		agentRepo: agentRepo,
+		engine:    detectionEngine,
 		metrics:   m,
 		log:       log,
 	}
@@ -98,6 +102,15 @@ func (s *EventService) Ingest(ctx context.Context, agentID uuid.UUID, req *trans
 		s.log.WithFields(logrus.Fields{
 			"agent_id": agentID,
 		}).WithError(err).Warn("failed to update agent last_seen_at")
+	}
+
+	if s.engine != nil {
+		if err := s.engine.ProcessEvent(ctx, event); err != nil {
+			s.log.WithFields(logrus.Fields{
+				"event_id": eventID,
+				"agent_id": agentID,
+			}).WithError(err).Warn("rule engine processing failed")
+		}
 	}
 
 	s.log.WithFields(logrus.Fields{
