@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"sync/atomic"
 	"time"
 
 	eventDomain "github.com/hildanku/xemarify/internal/modules/event/domain"
@@ -11,45 +12,43 @@ import (
 
 type Engine interface {
 	ProcessEvent(ctx context.Context, event *eventDomain.Event) error
+	ReloadRules(ctx context.Context) error
 	Stop()
+}
+
+type RuntimeRules struct {
+	rulesByEventType map[string][]CompiledRule
 }
 
 // RuleEngine implements an in-memory threshold detector:
 // Event -> Rule Match -> State Update -> Threshold Check -> Alert.
 type RuleEngine struct {
-	rulesByEventType map[string][]CompiledRule
-	matcher          *RuleMatcher
-	stateStore       *StateStore
-	alertWriter      AlertWriter
-	log              *logrus.Logger
+	runtimeRules atomic.Value
+	loader       RuleLoader
+	compiler     *RuleCompiler
+	matcher      *RuleMatcher
+	stateStore   *StateStore
+	alertWriter  AlertWriter
+	metrics      *EngineMetrics
+	log          *logrus.Logger
 }
 
 func NewRuleEngine(ctx context.Context, db *pgxpool.Pool, log *logrus.Logger) (*RuleEngine, error) {
-	loader := NewPGRuleLoader(db)
-	storedRules, err := loader.LoadEnabledRules(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	compiler := NewRuleCompiler()
-	indexedRules, compileErrs := compiler.Compile(storedRules)
-	for _, compileErr := range compileErrs {
-		log.WithError(compileErr).Warn("skipping invalid detection rule")
-	}
+	metrics := NewEngineMetrics()
 
 	engine := &RuleEngine{
-		rulesByEventType: indexedRules,
-		matcher:          NewRuleMatcher(),
-		stateStore:       NewStateStore(30 * time.Second),
-		alertWriter:      NewPGAlertBuilder(db),
-		log:              log,
+		loader:      NewPGRuleLoader(db),
+		compiler:    NewRuleCompiler(),
+		matcher:     NewRuleMatcher(),
+		alertWriter: NewPGAlertBuilder(db),
+		metrics:     metrics,
+		log:         log,
 	}
+	engine.stateStore = NewStateStore(30*time.Second, 100000, log, metrics)
 
-	log.WithFields(logrus.Fields{
-		"rules_loaded":  len(storedRules),
-		"event_types":   len(indexedRules),
-		"rules_skipped": len(compileErrs),
-	}).Info("rule engine initialized")
+	if err := engine.ReloadRules(ctx); err != nil {
+		return nil, err
+	}
 
 	return engine, nil
 }
@@ -59,15 +58,27 @@ func (e *RuleEngine) ProcessEvent(ctx context.Context, event *eventDomain.Event)
 		return nil
 	}
 
+	start := time.Now()
+	defer func() {
+		e.metrics.ProcessingLatency.Observe(time.Since(start).Seconds())
+	}()
+	e.metrics.EventsTotal.Inc()
+
 	eventType := e.matcher.EventType(event)
 	if eventType == "" {
 		return nil
 	}
 
-	rules := e.rulesByEventType[eventType]
+	runtimeRules := e.runtimeRules.Load()
+	if runtimeRules == nil {
+		return nil
+	}
+
+	rules := runtimeRules.(*RuntimeRules).rulesByEventType[eventType]
 	if len(rules) == 0 {
 		return nil
 	}
+	e.metrics.RulesEvaluatedTotal.Add(float64(len(rules)))
 
 	for _, rule := range rules {
 		correlationKey, ok := BuildCorrelationKey(rule, event, e.matcher)
@@ -75,8 +86,15 @@ func (e *RuleEngine) ProcessEvent(ctx context.Context, event *eventDomain.Event)
 			continue
 		}
 
-		state := e.stateStore.Update(rule, correlationKey, event.EventTime, event.ID)
+		state, canEvaluate := e.stateStore.Update(rule, correlationKey, event.EventTime, event.ID)
+		if !canEvaluate {
+			continue
+		}
 		if state.Count < rule.Threshold {
+			continue
+		}
+
+		if !state.LastAlertTime.IsZero() && state.LastSeen.Sub(state.LastAlertTime) < rule.Window {
 			continue
 		}
 
@@ -97,10 +115,32 @@ func (e *RuleEngine) ProcessEvent(ctx context.Context, event *eventDomain.Event)
 			"count":           state.Count,
 			"threshold":       rule.Threshold,
 		}).Info("detection alert triggered")
+		e.metrics.AlertsTotal.Inc()
 
-		// Reset after trigger to avoid generating one alert for every subsequent event.
-		e.stateStore.Reset(correlationKey)
+		e.stateStore.MarkAlert(correlationKey, state.LastSeen)
 	}
+
+	return nil
+}
+
+func (e *RuleEngine) ReloadRules(ctx context.Context) error {
+	storedRules, err := e.loader.LoadEnabledRules(ctx)
+	if err != nil {
+		return err
+	}
+
+	indexedRules, compileErrs := e.compiler.Compile(storedRules)
+	for _, compileErr := range compileErrs {
+		e.log.WithError(compileErr).Warn("skipping invalid detection rule")
+	}
+
+	e.runtimeRules.Store(&RuntimeRules{rulesByEventType: indexedRules})
+
+	e.log.WithFields(logrus.Fields{
+		"rules_loaded":  len(storedRules),
+		"event_types":   len(indexedRules),
+		"rules_skipped": len(compileErrs),
+	}).Info("rule engine rules reloaded")
 
 	return nil
 }
