@@ -119,7 +119,6 @@ func (r *pgAgentRepository) GetByID(ctx context.Context, agentId uuid.UUID) (*do
 }
 
 func (r *pgAgentRepository) List(ctx context.Context, filter ListFilter) ([]*domain.Agent, int, error) {
-	// Whitelist sortable columns to prevent SQL injection.
 	allowedCols := map[string]string{
 		"name":         "name",
 		"hostname":     "hostname",

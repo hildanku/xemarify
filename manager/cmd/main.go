@@ -144,7 +144,7 @@ func main() {
 	userHandle := userHandler.NewUserHandler(userSvc, log)
 	userHandle.Register(usersGroup)
 
-	// Agents - Manager only
+	// Agents (CRUD) - Manager only
 	agentsGroup := managerV1.Group("/agents")
 	agentsGroup.Use(middleware.RequireRole(userDomain.RoleManager))
 	agentHandle := agentHandler.NewAgentHandler(agentSvc, log)

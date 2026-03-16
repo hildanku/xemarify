@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	agentRepo "github.com/hildanku/xemarify/internal/modules/agent/repository"
 	agentService "github.com/hildanku/xemarify/internal/modules/agent/service"
 	"github.com/hildanku/xemarify/internal/modules/agent/transport"
@@ -27,6 +29,10 @@ func NewAgentHandler(svc *agentService.AgentService, log *logrus.Logger) *AgentH
 // The group must already have JWT + RBAC middleware applied.
 func (h *AgentHandler) Register(rg *gin.RouterGroup) {
 	rg.GET("", h.List)
+	rg.POST("", h.Create)
+	rg.GET("/:id", h.GetByID)
+	rg.PUT("/:id", h.Update)
+	rg.DELETE("/:id", h.Delete)
 }
 
 // List handles GET /api/v1/agents.
@@ -45,13 +51,22 @@ func (h *AgentHandler) List(c *gin.Context) {
 		return
 	}
 
+	sortBy := q.SortBy
+	if q.Sort != "" {
+		sortBy = q.Sort
+	}
+	offset := q.Offset
+	if offset == 0 && q.Page > 1 {
+		offset = (q.Page - 1) * q.Limit
+	}
+
 	filter := agentRepo.ListFilter{
 		BaseFilter: query.BaseFilter{
 			Search: q.Search,
-			SortBy: q.SortBy,
+			SortBy: sortBy,
 			Order:  query.SortOrder(q.Order),
 			Limit:  q.Limit,
-			Offset: q.Offset,
+			Offset: offset,
 		},
 	}
 
@@ -81,4 +96,110 @@ func (h *AgentHandler) List(c *gin.Context) {
 			Offset:     filter.Offset,
 		},
 	})
+}
+
+func (h *AgentHandler) Create(c *gin.Context) {
+	var req transport.CreateAgentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Write(c, http.StatusBadRequest, err.Error(), nil)
+		return
+	}
+
+	a, err := h.svc.Create(c.Request.Context(), agentService.CreateAgentInput{
+		Name:      req.Name,
+		Hostname:  req.Hostname,
+		IPAddress: req.IPAddress,
+		Version:   req.Version,
+		Status:    req.Status,
+		Key:       req.Key,
+	})
+	if err != nil {
+		if errors.Is(err, agentService.ErrInvalidAgentStatus) {
+			response.Write(c, http.StatusBadRequest, err.Error(), nil)
+			return
+		}
+		h.log.WithError(err).Error("failed to create agent")
+		response.Write(c, http.StatusInternalServerError, "internal server error", nil)
+		return
+	}
+
+	response.Write(c, http.StatusCreated, "agent created", transport.ToAgentResponse(a))
+}
+
+func (h *AgentHandler) GetByID(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Write(c, http.StatusBadRequest, "invalid agent id", nil)
+		return
+	}
+
+	a, err := h.svc.GetByID(c.Request.Context(), id)
+	if err != nil {
+		if errors.Is(err, agentService.ErrAgentNotFound) {
+			response.Write(c, http.StatusNotFound, "agent not found", nil)
+			return
+		}
+		h.log.WithError(err).Error("failed to get agent")
+		response.Write(c, http.StatusInternalServerError, "internal server error", nil)
+		return
+	}
+
+	response.Write(c, http.StatusOK, "agent retrieved", transport.ToAgentResponse(a))
+}
+
+func (h *AgentHandler) Update(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Write(c, http.StatusBadRequest, "invalid agent id", nil)
+		return
+	}
+
+	var req transport.UpdateAgentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Write(c, http.StatusBadRequest, err.Error(), nil)
+		return
+	}
+
+	a, err := h.svc.Update(c.Request.Context(), id, agentService.UpdateAgentInput{
+		Name:      req.Name,
+		Hostname:  req.Hostname,
+		IPAddress: req.IPAddress,
+		Version:   req.Version,
+		Status:    req.Status,
+	})
+	if err != nil {
+		if errors.Is(err, agentService.ErrAgentNotFound) {
+			response.Write(c, http.StatusNotFound, "agent not found", nil)
+			return
+		}
+		if errors.Is(err, agentService.ErrInvalidAgentStatus) {
+			response.Write(c, http.StatusBadRequest, err.Error(), nil)
+			return
+		}
+		h.log.WithError(err).Error("failed to update agent")
+		response.Write(c, http.StatusInternalServerError, "internal server error", nil)
+		return
+	}
+
+	response.Write(c, http.StatusOK, "agent updated", transport.ToAgentResponse(a))
+}
+
+func (h *AgentHandler) Delete(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Write(c, http.StatusBadRequest, "invalid agent id", nil)
+		return
+	}
+
+	if err := h.svc.Delete(c.Request.Context(), id); err != nil {
+		if errors.Is(err, agentService.ErrAgentNotFound) {
+			response.Write(c, http.StatusNotFound, "agent not found", nil)
+			return
+		}
+		h.log.WithError(err).Error("failed to delete agent")
+		response.Write(c, http.StatusInternalServerError, "internal server error", nil)
+		return
+	}
+
+	response.Write(c, http.StatusOK, "agent deleted", nil)
 }
