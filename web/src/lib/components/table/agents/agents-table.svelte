@@ -29,12 +29,20 @@
 		rowSelection = $bindable({}),
 		onSortChange,
 		onDelete,
+		onEdit,
 	}: {
 		data: Agent[]
 		params: TableParams
 		rowSelection: RowSelectionState
 		onSortChange: (sort: string, order: 'asc' | 'desc') => void
 		onDelete: (id: string) => void
+		onEdit: (id: string, data: {
+			name: string
+			hostname?: string
+			ip_address?: string
+			version?: string
+			status: Agent['status']
+		}) => void
 	} = $props()
 
 	const cellSnippet = createRawSnippet<[{ value: string; class?: string }]>(
@@ -102,7 +110,7 @@
 			enableSorting: false,
 			header: '',
 			cell: ({ row }) =>
-				renderComponent(AgentRowActions, { agent: row.original, onDelete }),
+				renderComponent(AgentRowActions, { agent: row.original, onDelete, onEdit }),
 		},
 	]
 

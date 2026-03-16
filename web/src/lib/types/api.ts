@@ -11,11 +11,21 @@ export interface Agent {
     last_seen_at: string | null
 }
 
-export interface UpsertAgentRequest {
+export interface CreateAgentRequest {
     name: string
     hostname?: string
     ip_address?: string
     version?: string
+    status?: AgentStatus
+    key?: string
+}
+
+export interface UpdateAgentRequest {
+    name: string
+    hostname?: string
+    ip_address?: string
+    version?: string
+    status: AgentStatus
 }
 
 export type UserRole = 'MANAGER' | 'ANALYST' | 'VIEWER'
@@ -119,4 +129,19 @@ export interface AlertEvent {
 export interface AlertDetail {
     alert: Alert
     events: AlertEvent[]
+}
+
+export interface EventItem {
+    id: string
+    event_time: string
+    received_at: string
+    agent_id: string
+    hostname: string
+    source_ip?: string
+    input_type?: string
+    facility?: string
+    severity?: string
+    category?: string
+    message: string
+    normalized?: Record<string, unknown>
 }

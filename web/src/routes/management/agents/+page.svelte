@@ -1,5 +1,9 @@
 <script lang="ts">
-	import type { Agent } from '$lib/types/api'
+	import type {
+		Agent,
+		CreateAgentRequest,
+		UpdateAgentRequest,
+	} from '$lib/types/api'
 	import type { ApiResponseWithMetadata } from '$lib/client'
 	import type { RowSelectionState } from '@tanstack/svelte-table'
 	import {
@@ -24,6 +28,7 @@
 	import { Input } from '$lib/components/ui/input/index.js'
 	import SearchIcon from '@lucide/svelte/icons/search'
 	import Trash2Icon from '@lucide/svelte/icons/trash-2'
+	import AgentCreateDialog from '$lib/components/table/agents/agent-create-dialog.svelte'
 
 	const queryClient = useQueryClient()
 	const params = $derived(parseTableParams($page.url))
@@ -52,6 +57,44 @@
 	const agents = $derived(agentsQuery.data?.data.items ?? [])
 	const metadata = $derived(agentsQuery.data?.data.metadata)
 	const totalPages = $derived(metadata?.total_pages ?? 1)
+
+	const createAgentMutation = createMutation(() => ({
+		mutationFn: (data: CreateAgentRequest) =>
+			clientFetch(`${V1_BASE_URL}/agents`, {
+				method: 'POST',
+				body: JSON.stringify(data),
+			}),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ['agents'] })
+			toast.success('Agent created successfully')
+		},
+		onError: (error: Error) => {
+			toast.error(`Failed to create agent: ${error.message}`)
+		},
+	}))
+
+	function handleCreate(data: CreateAgentRequest) {
+		createAgentMutation.mutate(data)
+	}
+
+	const updateAgentMutation = createMutation(() => ({
+		mutationFn: ({ id, data }: { id: string; data: UpdateAgentRequest }) =>
+			clientFetch(`${V1_BASE_URL}/agents/${id}`, {
+				method: 'PUT',
+				body: JSON.stringify(data),
+			}),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ['agents'] })
+			toast.success('Agent updated successfully')
+		},
+		onError: (error: Error) => {
+			toast.error(`Failed to update agent: ${error.message}`)
+		},
+	}))
+
+	function handleEdit(id: string, data: UpdateAgentRequest) {
+		updateAgentMutation.mutate({ id, data })
+	}
 
 	const deleteMutation = createMutation(() => ({
 		mutationFn: (id: string) =>
@@ -112,6 +155,7 @@
 		if (!value) return
 		updateTableParams({ limit: parseInt(value), page: 1 }, $page.url)
 	}
+
 </script>
 
 <div class="flex flex-1 flex-col gap-4 p-4 max-w-full">
@@ -123,6 +167,10 @@
 				Monitor and manage connected security agents
 			</p>
 		</div>
+		<AgentCreateDialog
+			onCreate={handleCreate}
+			isPending={createAgentMutation.isPending}
+		/>
 	</div>
 
 	<div class="flex flex-wrap items-center gap-2">
@@ -130,7 +178,16 @@
 			<SearchIcon
 				class="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none"
 			/>
-			<Input class="pl-9" placeholder="Search agents…" />
+			<Input
+				class="pl-9"
+				placeholder="Search agents..."
+				value={params.search}
+				oninput={(e) =>
+					updateTableParams(
+						{ search: (e.target as HTMLInputElement).value },
+						$page.url,
+					)}
+			/>
 		</div>
 		<!-- Bulk delete -->
 		{#if selectedIds.length > 0}
@@ -191,10 +248,11 @@
 				bind:rowSelection
 				onSortChange={handleSortChange}
 				onDelete={handleDeleteSingle}
+				onEdit={handleEdit}
 			/>
 		{/if}
 	</div>
-    <div class="flex items-center justify-between">
+	<div class="flex items-center justify-between">
 		<LimitSelect
 			value={params.limit}
 			onValueChange={(v) => handleLimitChange(String(v))}

@@ -6,6 +6,7 @@
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js'
 	import * as Dialog from '$lib/components/ui/dialog/index.js'
 	import * as Form from '$lib/components/ui/form/index.js'
+	import * as Select from '$lib/components/ui/select/index.js'
 	import { Button } from '$lib/components/ui/button/index.js'
 	import { Input } from '$lib/components/ui/input/index.js'
 	import AgentStatusBadge from './agent-status-badge.svelte'
@@ -15,19 +16,30 @@
 	let {
 		agent,
 		onDelete,
+		onEdit,
 	}: {
 		agent: Agent
 		onDelete: (id: string) => void
+		onEdit: (id: string, data: {
+			name: string
+			hostname?: string
+			ip_address?: string
+			version?: string
+			status: Agent['status']
+		}) => void
 	} = $props()
 
 	let viewOpen = $state(false)
 	let editOpen = $state(false)
+
+	const STATUSES = ['ONLINE', 'OFFLINE'] as const
 
 	const agentSchema = z.object({
 		name: z.string().min(1, 'Name is required').max(100),
 		hostname: z.string().max(253).optional().default(''),
 		ip_address: z.string().max(50).optional().default(''),
 		version: z.string().max(50).optional().default(''),
+		status: z.enum(STATUSES),
 	})
 
 	type AgentFormData = z.infer<typeof agentSchema>
@@ -37,7 +49,21 @@
 		SPA: true,
 		onUpdate({ form: fd }) {
 			if (fd.valid) {
-				console.log('still develop: edit agent', agent.id, fd.data)
+				const payload: {
+					name: string
+					hostname?: string
+					ip_address?: string
+					version?: string
+					status: Agent['status']
+				} = {
+					name: fd.data.name,
+					status: fd.data.status,
+				}
+				if (fd.data.hostname) payload.hostname = fd.data.hostname
+				if (fd.data.ip_address) payload.ip_address = fd.data.ip_address
+				if (fd.data.version) payload.version = fd.data.version
+
+				onEdit(agent.id, payload)
 				editOpen = false
 			}
 		},
@@ -54,6 +80,7 @@
 					hostname: agent.hostname ?? '',
 					ip_address: agent.ip_address ?? '',
 					version: agent.version ?? '',
+					status: agent.status,
 				} satisfies AgentFormData,
 			})
 		}
@@ -205,6 +232,25 @@
 							bind:value={$formData.version}
 							placeholder="e.g. v2.4.5"
 						/>
+					{/snippet}
+				</Form.Control>
+				<Form.FieldErrors class="text-xs" />
+			</Form.Field>
+
+			<Form.Field {form} name="status">
+				<Form.Control>
+					{#snippet children({ props })}
+						<Form.Label>Status</Form.Label>
+						<Select.Root type="single" bind:value={$formData.status}>
+							<Select.Trigger {...props} class="w-full">
+								{$formData.status || 'Select a status'}
+							</Select.Trigger>
+							<Select.Content>
+								{#each STATUSES as status (status)}
+									<Select.Item value={status}>{status}</Select.Item>
+								{/each}
+							</Select.Content>
+						</Select.Root>
 					{/snippet}
 				</Form.Control>
 				<Form.FieldErrors class="text-xs" />
