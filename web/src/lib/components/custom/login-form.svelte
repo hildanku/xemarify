@@ -13,6 +13,7 @@
     import { clientFetch } from '$lib/client'
     import { resolve } from '$app/paths'
     import { goto } from '$app/navigation'
+	import { toast } from 'svelte-sonner'
     
     let {
         ref = $bindable(null),
@@ -27,16 +28,20 @@
 
     const loginMutation = createMutation(() => ({
         mutationFn: async () => {
-            clientFetch('http://localhost:8089/auth/login', {
+            const res = await clientFetch('http://localhost:8089/auth/login', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({ email, password }),
             })
+            return res
         },
-        onSuccess: (data) => {
-            console.log('Login successful:', data)
+        onSuccess: (res) => {
+            console.log('Login successful:', res)
+            localStorage.setItem('access_token', res.data.access_token)
+            localStorage.setItem('refresh_token', res.data.refresh_token)
+            toast.success('Login successful!')
             goto(resolve('/management'))
         },
         onError: (error) => {
