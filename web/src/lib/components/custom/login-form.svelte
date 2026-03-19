@@ -10,10 +10,11 @@
     import { cn, type WithElementRef } from '$lib/utils.js'
     import type { HTMLFormAttributes } from 'svelte/elements'
     import { createMutation } from '@tanstack/svelte-query'
-    import { clientFetch } from '$lib/client'
-    import { resolve } from '$app/paths'
+    import { page } from '$app/stores'
     import { goto } from '$app/navigation'
 	import { toast } from 'svelte-sonner'
+    import { getDefaultRouteForUser } from '$lib/auth/guard'
+    import { login } from '$lib/auth/session'
     
     let {
         ref = $bindable(null),
@@ -28,24 +29,15 @@
 
     const loginMutation = createMutation(() => ({
         mutationFn: async () => {
-            const res = await clientFetch('http://localhost:8089/auth/login', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ email, password }),
-            })
-            return res
+            return login(email, password)
         },
-        onSuccess: (res) => {
-            console.log('Login successful:', res)
-            localStorage.setItem('access_token', res.data.access_token)
-            localStorage.setItem('refresh_token', res.data.refresh_token)
+        onSuccess: async (session) => {
             toast.success('Login successful!')
-            goto(resolve('/management'))
+            const redirect = $page.url.searchParams.get('redirect')
+            await goto(redirect || getDefaultRouteForUser(session.user))
         },
         onError: (error) => {
-            console.error('Login failed:', error)
+            toast.error(error instanceof Error ? error.message : 'Login failed')
         },
     })
 )
@@ -112,4 +104,3 @@
         </Field>
     </FieldGroup>
 </form>
-

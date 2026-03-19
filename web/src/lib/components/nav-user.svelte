@@ -10,6 +10,7 @@
 	import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
 	import * as Sidebar from "$lib/components/ui/sidebar/index.js";
 	import { useSidebar } from "$lib/components/ui/sidebar/index.js";
+	import { logout } from '$lib/auth/session'
 
 	let {
 		user,
@@ -22,6 +23,10 @@
 	} = $props();
 
 	const sidebar = useSidebar();
+
+	async function handleLogout() {
+		await logout()
+	}
 </script>
 
 <Sidebar.Menu>
@@ -87,7 +92,7 @@
 					</DropdownMenu.Item>
 				</DropdownMenu.Group>
 				<DropdownMenu.Separator />
-				<DropdownMenu.Item>
+				<DropdownMenu.Item onclick={handleLogout}>
 					<LogOutIcon />
 					Log out
 				</DropdownMenu.Item>
