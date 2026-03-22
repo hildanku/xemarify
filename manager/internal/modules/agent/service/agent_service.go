@@ -2,8 +2,13 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/hildanku/xemarify/internal/modules/agent/domain"
@@ -15,10 +20,15 @@ var ErrAgentNotFound = errors.New("agent not found")
 
 var ErrInvalidAgentStatus = errors.New("invalid agent status")
 
+var ErrInvalidEnrollmentKey = errors.New("invalid enrollment key")
+
+var ErrAgentIdentityMismatch = errors.New("agent identity mismatch")
+
 // AgentService handles business logic for the agent resource.
 type AgentService struct {
-	repo agentRepo.AgentRepository
-	log  *logrus.Logger
+	repo            agentRepo.AgentRepository
+	log             *logrus.Logger
+	heartbeatStates sync.Map
 }
 
 // NewAgentService constructs the service with its required dependencies.
@@ -38,6 +48,33 @@ type CreateAgentInput struct {
 	Version   string
 	Status    string
 	Key       string
+}
+
+type RegisterInput struct {
+	Name          string
+	Hostname      string
+	IPAddress     string
+	OS            string
+	Version       string
+	EnrollmentKey string
+}
+
+type RegisterResult struct {
+	AgentID string
+	Key     string
+}
+
+type HeartbeatInput struct {
+	AuthenticatedAgentID uuid.UUID
+	AgentID              string
+	EventsSent           int64
+	Uptime               int64
+}
+
+type heartbeatState struct {
+	EventsSent int64
+	Uptime     int64
+	UpdatedAt  time.Time
 }
 
 func (s *AgentService) Create(ctx context.Context, input CreateAgentInput) (*domain.Agent, error) {
@@ -65,6 +102,92 @@ func (s *AgentService) Create(ctx context.Context, input CreateAgentInput) (*dom
 	}
 
 	return agent, nil
+}
+
+func (s *AgentService) Register(ctx context.Context, input RegisterInput) (*RegisterResult, error) {
+	name := strings.TrimSpace(input.Name)
+	hostname := strings.TrimSpace(input.Hostname)
+	ipAddress := strings.TrimSpace(input.IPAddress)
+	version := strings.TrimSpace(input.Version)
+	enrollmentKey := strings.TrimSpace(input.EnrollmentKey)
+
+	if name == "" {
+		name = hostname
+	}
+	if hostname == "" {
+		hostname = name
+	}
+
+	sessionKey, err := generateSessionKey()
+	if err != nil {
+		return nil, err
+	}
+
+	agent := &domain.Agent{
+		ID:        uuid.New(),
+		Name:      name,
+		Hostname:  hostname,
+		IPAddress: ipAddress,
+		Version:   version,
+		Status:    domain.AgentStatusOffline,
+		Key:       sessionKey,
+	}
+
+	if err := s.repo.CreateWithEnrollmentKey(ctx, enrollmentKey, agent); err != nil {
+		if errors.Is(err, agentRepo.ErrEnrollmentKeyInvalid) {
+			return nil, ErrInvalidEnrollmentKey
+		}
+		return nil, err
+	}
+
+	return &RegisterResult{
+		AgentID: agent.ID.String(),
+		Key:     sessionKey,
+	}, nil
+}
+
+func (s *AgentService) Heartbeat(ctx context.Context, input HeartbeatInput) error {
+	heartbeatAgentID, err := uuid.Parse(strings.TrimSpace(input.AgentID))
+	if err != nil {
+		return fmt.Errorf("invalid agent id: %w", err)
+	}
+
+	if heartbeatAgentID != input.AuthenticatedAgentID {
+		return ErrAgentIdentityMismatch
+	}
+
+	a, err := s.repo.GetByID(ctx, heartbeatAgentID)
+	if err != nil {
+		return err
+	}
+	if a == nil {
+		return ErrAgentNotFound
+	}
+
+	if err := s.repo.UpdateLastSeen(ctx, heartbeatAgentID); err != nil {
+		return err
+	}
+
+	s.heartbeatStates.Store(heartbeatAgentID, heartbeatState{
+		EventsSent: input.EventsSent,
+		Uptime:     input.Uptime,
+		UpdatedAt:  time.Now().UTC(),
+	})
+
+	return nil
+}
+
+func (s *AgentService) GenerateEnrollmentKey(ctx context.Context) (string, error) {
+	key, err := generateSessionKey()
+	if err != nil {
+		return "", err
+	}
+
+	if err := s.repo.CreateEnrollmentKey(ctx, key); err != nil {
+		return "", err
+	}
+
+	return key, nil
 }
 
 func (s *AgentService) GetByID(ctx context.Context, id uuid.UUID) (*domain.Agent, error) {
@@ -145,4 +268,13 @@ func normalizeStatus(status string) (domain.AgentStatus, error) {
 	default:
 		return "", ErrInvalidAgentStatus
 	}
+}
+
+func generateSessionKey() (string, error) {
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+
+	return hex.EncodeToString(raw), nil
 }

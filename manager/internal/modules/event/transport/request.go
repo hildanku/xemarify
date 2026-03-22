@@ -2,20 +2,24 @@ package transport
 
 import "time"
 
-// IngestEventRequest is the JSON payload received from an agent via POST /api/v1/events.
-// This is separated from the domain model to allow independent evolution of the HTTP contract.
-type IngestEventRequest struct {
-	ID         string                 `json:"id"         binding:"required,uuid"`
-	EventTime  string                 `json:"event_time"`
-	Message    string                 `json:"message"    binding:"required"`
-	Raw        string                 `json:"raw"        binding:"required"`
+// IngestEvent contains a single normalized event in a batch ingest request.
+type IngestEvent struct {
+	EventTime  time.Time              `json:"event_time"`
+	Hostname   string                 `json:"hostname" binding:"required"`
+	SourceIP   string                 `json:"source_ip"`
 	InputType  string                 `json:"input_type"`
 	Facility   string                 `json:"facility"`
-	Severity   string                 `json:"severity"`
-	Category   string                 `json:"category"`
-	Hostname   string                 `json:"hostname"`
-	SourceIP   string                 `json:"source_ip"`
+	Severity   string                 `json:"severity" binding:"required,oneof=INFO LOW MEDIUM HIGH CRITICAL"`
+	Category   string                 `json:"category" binding:"required"`
+	Message    string                 `json:"message" binding:"required"`
 	Normalized map[string]interface{} `json:"normalized"`
+	Raw        string                 `json:"raw" binding:"required"`
+}
+
+// EventBatchRequest is the payload received via POST /api/v1/events.
+type EventBatchRequest struct {
+	AgentID string        `json:"agent_id" binding:"required,uuid"`
+	Events  []IngestEvent `json:"events" binding:"required,min=1,dive"`
 }
 
 // ListEventsQuery holds the query parameters for GET /api/v1/events.

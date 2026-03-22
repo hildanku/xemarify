@@ -23,6 +23,74 @@ func NewPgAgentRepository(db *pgxpool.Pool) AgentRepository {
 	return &pgAgentRepository{db: db}
 }
 
+func (r *pgAgentRepository) CreateEnrollmentKey(ctx context.Context, key string) error {
+	const q = `
+		INSERT INTO agent_keys (id, key, status, created_at)
+		VALUES ($1, $2, 'unused', NOW())
+	`
+
+	_, err := r.db.Exec(ctx, q, uuid.New(), key)
+	return err
+}
+
+func (r *pgAgentRepository) CreateWithEnrollmentKey(ctx context.Context, enrollmentKey string, a *domain.Agent) error {
+	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	const lockKeyQuery = `
+		SELECT id
+		FROM agent_keys
+		WHERE key = $1 AND status = 'unused'
+		FOR UPDATE
+	`
+
+	var enrollmentID uuid.UUID
+	if err := tx.QueryRow(ctx, lockKeyQuery, enrollmentKey).Scan(&enrollmentID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrEnrollmentKeyInvalid
+		}
+		return err
+	}
+
+	const insertAgentQuery = `
+		INSERT INTO agents (
+			id, name, hostname, key, ip_address, version, status, created_at
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+		`
+
+	var ipAddress *string
+	if a.IPAddress != "" {
+		ipAddress = &a.IPAddress
+	}
+
+	if _, err := tx.Exec(ctx, insertAgentQuery, a.ID, a.Name, a.Hostname, a.Key, ipAddress, a.Version, a.Status); err != nil {
+		return err
+	}
+
+	const useKeyQuery = `
+		UPDATE agent_keys
+		SET status = 'used',
+		    used_by_agent_id = $2,
+		    used_at = NOW()
+		WHERE id = $1
+	`
+
+	if _, err := tx.Exec(ctx, useKeyQuery, enrollmentID, a.ID); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (r *pgAgentRepository) GetByKey(ctx context.Context, key string) (*domain.Agent, error) {
 	const q = `
 		SELECT id, name, hostname, key, ip_address::text, version, status, created_at, last_seen_at

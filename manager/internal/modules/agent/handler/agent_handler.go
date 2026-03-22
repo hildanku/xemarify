@@ -3,9 +3,11 @@ package handler
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/hildanku/xemarify/internal/infrastructure/middleware"
 	agentRepo "github.com/hildanku/xemarify/internal/modules/agent/repository"
 	agentService "github.com/hildanku/xemarify/internal/modules/agent/service"
 	"github.com/hildanku/xemarify/internal/modules/agent/transport"
@@ -20,6 +22,8 @@ type AgentHandler struct {
 	log *logrus.Logger
 }
 
+const agentKeyHeader = "X-Agent-Key"
+
 // NewAgentHandler constructs an AgentHandler.
 func NewAgentHandler(svc *agentService.AgentService, log *logrus.Logger) *AgentHandler {
 	return &AgentHandler{svc: svc, log: log}
@@ -33,6 +37,110 @@ func (h *AgentHandler) Register(rg *gin.RouterGroup) {
 	rg.GET("/:id", h.GetByID)
 	rg.PUT("/:id", h.Update)
 	rg.DELETE("/:id", h.Delete)
+}
+
+// RegisterAgentPublic wires public agent enrollment routes.
+func (h *AgentHandler) RegisterAgentPublic(rg *gin.RouterGroup) {
+	rg.POST("/register", h.RegisterAgent)
+}
+
+// RegisterAgentSession wires authenticated agent routes.
+func (h *AgentHandler) RegisterAgentSession(rg *gin.RouterGroup) {
+	rg.POST("/heartbeat", h.Heartbeat)
+}
+
+// RegisterAdmin wires manager-only admin routes under /api/v1/admin.
+func (h *AgentHandler) RegisterAdmin(rg *gin.RouterGroup) {
+	rg.POST("/agent-keys", h.CreateEnrollmentKey)
+}
+
+// RegisterAgent handles POST /api/v1/agents/register.
+func (h *AgentHandler) RegisterAgent(c *gin.Context) {
+	enrollmentKey := strings.TrimSpace(c.GetHeader(agentKeyHeader))
+	if enrollmentKey == "" {
+		response.Write(c, http.StatusUnauthorized, "missing X-Agent-Key header", nil)
+		return
+	}
+
+	var req transport.RegisterRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Write(c, http.StatusBadRequest, err.Error(), nil)
+		return
+	}
+
+	registered, err := h.svc.Register(c.Request.Context(), agentService.RegisterInput{
+		Name:          req.Name,
+		Hostname:      req.Hostname,
+		IPAddress:     req.IP,
+		OS:            req.OS,
+		Version:       req.Version,
+		EnrollmentKey: enrollmentKey,
+	})
+	if err != nil {
+		if errors.Is(err, agentService.ErrInvalidEnrollmentKey) {
+			response.Write(c, http.StatusUnauthorized, "invalid enrollment key", nil)
+			return
+		}
+
+		h.log.WithError(err).Error("failed to register agent")
+		response.Write(c, http.StatusInternalServerError, "internal server error", nil)
+		return
+	}
+
+	c.JSON(http.StatusCreated, transport.RegisterResponse{
+		AgentID: registered.AgentID,
+		Key:     registered.Key,
+	})
+}
+
+// Heartbeat handles POST /api/v1/agents/heartbeat.
+func (h *AgentHandler) Heartbeat(c *gin.Context) {
+	authenticatedAgent := middleware.AgentFromContext(c)
+	if authenticatedAgent == nil {
+		response.Write(c, http.StatusUnauthorized, "unauthorized", nil)
+		return
+	}
+
+	var req transport.HeartbeatRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Write(c, http.StatusBadRequest, err.Error(), nil)
+		return
+	}
+
+	err := h.svc.Heartbeat(c.Request.Context(), agentService.HeartbeatInput{
+		AuthenticatedAgentID: authenticatedAgent.ID,
+		AgentID:              req.AgentID,
+		EventsSent:           req.EventsSent,
+		Uptime:               req.Uptime,
+	})
+	if err != nil {
+		if errors.Is(err, agentService.ErrAgentIdentityMismatch) {
+			response.Write(c, http.StatusForbidden, "agent identity mismatch", nil)
+			return
+		}
+		if errors.Is(err, agentService.ErrAgentNotFound) {
+			response.Write(c, http.StatusNotFound, "agent not found", nil)
+			return
+		}
+
+		h.log.WithError(err).Error("failed to process heartbeat")
+		response.Write(c, http.StatusInternalServerError, "internal server error", nil)
+		return
+	}
+
+	response.Write(c, http.StatusOK, "heartbeat accepted", nil)
+}
+
+// CreateEnrollmentKey handles POST /api/v1/admin/agent-keys.
+func (h *AgentHandler) CreateEnrollmentKey(c *gin.Context) {
+	key, err := h.svc.GenerateEnrollmentKey(c.Request.Context())
+	if err != nil {
+		h.log.WithError(err).Error("failed to create enrollment key")
+		response.Write(c, http.StatusInternalServerError, "internal server error", nil)
+		return
+	}
+
+	c.JSON(http.StatusCreated, transport.CreateAgentKeyResponse{Key: key})
 }
 
 // List handles GET /api/v1/agents.

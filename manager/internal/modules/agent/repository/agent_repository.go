@@ -2,11 +2,14 @@ package repository
 
 import (
 	"context"
+	"errors"
 
 	"github.com/google/uuid"
 	"github.com/hildanku/xemarify/internal/modules/agent/domain"
 	"github.com/hildanku/xemarify/pkg/query"
 )
+
+var ErrEnrollmentKeyInvalid = errors.New("enrollment key is invalid or already used")
 
 // ListFilter holds all filter and pagination options for listing agents.
 // It embeds query.BaseFilter for the shared sort/pagination contract, and can be
@@ -20,6 +23,12 @@ type ListFilter struct {
 
 // AgentRepository defines the persistence contract for the agent module.
 type AgentRepository interface {
+	// CreateEnrollmentKey persists a new one-time enrollment key.
+	CreateEnrollmentKey(ctx context.Context, key string) error
+
+	// CreateWithEnrollmentKey creates an agent and marks enrollment key as used atomically.
+	CreateWithEnrollmentKey(ctx context.Context, enrollmentKey string, agent *domain.Agent) error
+
 	// GetByKey looks up an agent by its secret key. Returns nil if not found.
 	GetByKey(ctx context.Context, key string) (*domain.Agent, error)
 

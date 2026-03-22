@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
@@ -55,7 +56,7 @@ func (h *EventHandler) Ingest(c *gin.Context) {
 		return
 	}
 
-	var req transport.IngestEventRequest
+	var req transport.EventBatchRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		h.metrics.EventsFailed.WithLabelValues("validation_error").Inc()
 		h.log.WithFields(logrus.Fields{
@@ -66,11 +67,15 @@ func (h *EventHandler) Ingest(c *gin.Context) {
 		return
 	}
 
-	h.metrics.EventsReceived.WithLabelValues(agent.ID.String()).Inc()
+	h.metrics.EventsReceived.WithLabelValues(agent.ID.String()).Add(float64(len(req.Events)))
 
-	event, err := h.svc.Ingest(c.Request.Context(), agent.ID, &req)
+	accepted, err := h.svc.IngestBatch(c.Request.Context(), agent.ID, &req)
 	if err != nil {
 		h.metrics.EventsFailed.WithLabelValues("ingest_error").Inc()
+		if errors.Is(err, service.ErrAgentIDMismatch) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "agent identity mismatch"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to ingest event"})
 		return
 	}
@@ -79,8 +84,7 @@ func (h *EventHandler) Ingest(c *gin.Context) {
 	h.metrics.IngestionLatency.Observe(elapsed)
 
 	c.JSON(http.StatusAccepted, gin.H{
-		"event_id":    event.ID,
-		"received_at": event.ReceivedAt,
+		"accepted": accepted,
 	})
 }
 

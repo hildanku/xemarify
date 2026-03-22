@@ -81,12 +81,14 @@ func main() {
 	}
 	defer ruleEngine.Stop()
 
-	evtService := eventService.NewEventService(eventRepository, agentRepository, ruleEngine, m, log)
+	evtService := eventService.NewEventService(eventRepository, ruleEngine, m, log)
 	auditLogService := auditService.NewAuditLogService(auditLogRepository, log)
 	authSvc := authService.NewAuthService(userRepository, authRepository, auditLogService, cfg.JWT, log)
 	userSvc := userService.NewUserService(db, userRepository, auditLogService, log)
 	ruleSvc := ruleService.NewRuleService(ruleRepository, ruleEngine, log)
 	alertSvc := alertService.NewAlertService(alertRepository, log)
+	agentHandle := agentHandler.NewAgentHandler(agentSvc, log)
+	evtHandler := eventHandler.NewEventHandler(evtService, m, log)
 
 	// HTTP router
 	if cfg.LogLevel != "debug" {
@@ -125,14 +127,22 @@ func main() {
 	authProtected.Use(middleware.UserAuth(cfg.JWT))
 	authHandle.RegisterProtected(authProtected)
 
-	// Agent API v1 (agent key + rate-limit)
+	// Agent API v1
 	rateCfg := middleware.DefaultRateLimiterConfig()
 	apiV1 := router.Group("/api/v1")
-	apiV1.Use(middleware.AgentAuth(agentRepository, log))
-	apiV1.Use(middleware.AgentRateLimit(rateCfg, log))
 
-	evtHandler := eventHandler.NewEventHandler(evtService, m, log)
-	evtHandler.Register(apiV1)
+	agentPublicGroup := apiV1.Group("/agents")
+	agentHandle.RegisterAgentPublic(agentPublicGroup)
+
+	agentSessionGroup := apiV1.Group("/agents")
+	agentSessionGroup.Use(middleware.AgentAuth(agentRepository, log))
+	agentSessionGroup.Use(middleware.AgentRateLimit(rateCfg, log))
+	agentHandle.RegisterAgentSession(agentSessionGroup)
+
+	eventIngestGroup := apiV1.Group("")
+	eventIngestGroup.Use(middleware.AgentAuth(agentRepository, log))
+	eventIngestGroup.Use(middleware.AgentRateLimit(rateCfg, log))
+	evtHandler.Register(eventIngestGroup)
 
 	// Manaager API v1 (jwt+rbac)
 	managerV1 := router.Group("/api/v1")
@@ -147,8 +157,12 @@ func main() {
 	// Agents (CRUD) - Manager only
 	agentsGroup := managerV1.Group("/agents")
 	agentsGroup.Use(middleware.RequireRole(userDomain.RoleManager))
-	agentHandle := agentHandler.NewAgentHandler(agentSvc, log)
 	agentHandle.Register(agentsGroup)
+
+	// Admin - Manager only
+	adminGroup := managerV1.Group("/admin")
+	adminGroup.Use(middleware.RequireRole(userDomain.RoleManager))
+	agentHandle.RegisterAdmin(adminGroup)
 
 	// Audit Logs - Manager & Analyst
 	auditGroup := managerV1.Group("/audit-logs")
