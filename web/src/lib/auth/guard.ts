@@ -4,6 +4,7 @@ import type { SessionUser } from '$lib/auth/session'
 const MANAGER_ONLY_PREFIXES = [
 	'/management/users',
 	'/management/agents',
+	'/management/agent-keys',
 	'/management/rules',
 ] as const
 

@@ -167,10 +167,15 @@
 				Monitor and manage connected security agents
 			</p>
 		</div>
-		<AgentCreateDialog
-			onCreate={handleCreate}
-			isPending={createAgentMutation.isPending}
-		/>
+		<div class="flex items-center gap-2">
+			<Button variant="outline" href="/management/agent-keys">
+				Agent Keys
+			</Button>
+			<AgentCreateDialog
+				onCreate={handleCreate}
+				isPending={createAgentMutation.isPending}
+			/>
+		</div>
 	</div>
 
 	<div class="flex flex-wrap items-center gap-2">

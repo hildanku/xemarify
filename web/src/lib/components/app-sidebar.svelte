@@ -3,6 +3,7 @@
     import LayoutmanagementIcon from '@lucide/svelte/icons/layout-dashboard'
     import FileTextIcon from '@lucide/svelte/icons/file-text'
     import BellIcon from '@lucide/svelte/icons/bell'
+    import ClipboardListIcon from '@lucide/svelte/icons/clipboard-list'
     import ShieldAlertIcon from '@lucide/svelte/icons/shield-alert'
     import ServerIcon from '@lucide/svelte/icons/server'
     import BookOpenIcon from '@lucide/svelte/icons/book-open'
@@ -39,6 +40,11 @@
                 url: '/management/alerts',
                 icon: BellIcon,
             },
+            {
+                title: 'Audit Logs',
+                url: '/management/audit-logs',
+                icon: ClipboardListIcon,
+            },
         ]
 
         if (role === 'MANAGER') {
@@ -51,6 +57,11 @@
                 {
                     title: 'Agents',
                     url: '/management/agents',
+                    icon: ServerIcon,
+                },
+                {
+                    title: 'Agent Keys',
+                    url: '/management/agent-keys',
                     icon: ServerIcon,
                 },
             )
