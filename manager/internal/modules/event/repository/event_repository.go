@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/hildanku/xemarify/internal/modules/event/domain"
 	"github.com/hildanku/xemarify/pkg/query"
 )
@@ -43,4 +44,7 @@ type EventRepository interface {
 	// List returns a filtered, sorted, paginated slice of events together
 	// with the total count matching the filter (ignoring limit/offset).
 	List(ctx context.Context, filter ListFilter) ([]*domain.Event, int, error)
+
+	// GetByID returns a single event by ID, or nil when not found.
+	GetByID(ctx context.Context, id uuid.UUID) (*domain.Event, error)
 }

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/hildanku/xemarify/internal/infrastructure/metrics"
 	"github.com/hildanku/xemarify/internal/infrastructure/middleware"
 	eventRepo "github.com/hildanku/xemarify/internal/modules/event/repository"
@@ -39,6 +40,7 @@ func (h *EventHandler) Register(rg *gin.RouterGroup) {
 // RegisterManager wires read-only event routes onto a manager-auth group.
 func (h *EventHandler) RegisterManager(rg *gin.RouterGroup) {
 	rg.GET("", h.List)
+	rg.GET("/:id", h.GetByID)
 }
 
 // Ingest handles POST /api/v1/events.
@@ -155,4 +157,26 @@ func (h *EventHandler) List(c *gin.Context) {
 			Offset:     filter.Offset,
 		},
 	})
+}
+
+// GetByID handles GET /api/v1/events/:id (manager/analyst).
+func (h *EventHandler) GetByID(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Write(c, http.StatusBadRequest, "invalid event id", nil)
+		return
+	}
+
+	event, err := h.svc.GetByID(c.Request.Context(), id)
+	if err != nil {
+		if errors.Is(err, service.ErrEventNotFound) {
+			response.Write(c, http.StatusNotFound, "event not found", nil)
+			return
+		}
+		h.log.WithError(err).Error("failed to get event")
+		response.Write(c, http.StatusInternalServerError, "internal server error", nil)
+		return
+	}
+
+	response.Write(c, http.StatusOK, "event retrieved", transport.ToEventDetailResponse(event))
 }

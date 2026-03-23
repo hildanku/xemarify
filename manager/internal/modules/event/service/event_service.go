@@ -17,6 +17,8 @@ import (
 
 var ErrAgentIDMismatch = errors.New("agent id mismatch")
 
+var ErrEventNotFound = errors.New("event not found")
+
 // EventService orchestrates event validation, normalization, and persistence.
 // It owns a single public method - Ingest - which is the intake point for the
 // ingestion pipeline.  All steps are synchronous (Phase 1 design decision).
@@ -130,4 +132,16 @@ func (s *EventService) normalize(e *domain.Event) {
 // match count within the requested date window.
 func (s *EventService) List(ctx context.Context, filter eventRepo.ListFilter) ([]*domain.Event, int, error) {
 	return s.eventRepo.List(ctx, filter)
+}
+
+// GetByID returns one event by ID.
+func (s *EventService) GetByID(ctx context.Context, id uuid.UUID) (*domain.Event, error) {
+	event, err := s.eventRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if event == nil {
+		return nil, ErrEventNotFound
+	}
+	return event, nil
 }

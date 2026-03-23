@@ -3,11 +3,14 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/hildanku/xemarify/internal/modules/event/domain"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -196,4 +199,53 @@ func (r *pgEventRepository) List(ctx context.Context, f ListFilter) ([]*domain.E
 	}
 
 	return events, total, nil
+}
+
+func (r *pgEventRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.Event, error) {
+	const q = `
+		SELECT id, event_time, received_at,
+		       agent_id, hostname, source_ip::text, input_type,
+		       facility, severity, category,
+		       message, normalized, raw
+		FROM events
+		WHERE id = $1
+		LIMIT 1
+	`
+
+	var event domain.Event
+	var sourceIP *string
+	var normalizedBytes []byte
+
+	err := r.db.QueryRow(ctx, q, id).Scan(
+		&event.ID,
+		&event.EventTime,
+		&event.ReceivedAt,
+		&event.AgentID,
+		&event.Hostname,
+		&sourceIP,
+		&event.InputType,
+		&event.Facility,
+		&event.Severity,
+		&event.Category,
+		&event.Message,
+		&normalizedBytes,
+		&event.Raw,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	if sourceIP != nil {
+		event.SourceIP = *sourceIP
+	}
+	if normalizedBytes != nil {
+		if err := json.Unmarshal(normalizedBytes, &event.Normalized); err != nil {
+			return nil, err
+		}
+	}
+
+	return &event, nil
 }

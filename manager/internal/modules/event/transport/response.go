@@ -23,6 +23,24 @@ type EventResponse struct {
 	Normalized map[string]interface{} `json:"normalized,omitempty"`
 }
 
+// EventDetailResponse is the JSON representation used by GET /api/v1/events/:id.
+// Includes raw payload for deep inspection.
+type EventDetailResponse struct {
+	ID         uuid.UUID              `json:"id"`
+	EventTime  time.Time              `json:"event_time"`
+	ReceivedAt time.Time              `json:"received_at"`
+	AgentID    uuid.UUID              `json:"agent_id"`
+	Hostname   string                 `json:"hostname"`
+	SourceIP   string                 `json:"source_ip,omitempty"`
+	InputType  string                 `json:"input_type,omitempty"`
+	Facility   string                 `json:"facility,omitempty"`
+	Severity   string                 `json:"severity,omitempty"`
+	Category   string                 `json:"category,omitempty"`
+	Message    string                 `json:"message"`
+	Normalized map[string]interface{} `json:"normalized,omitempty"`
+	Raw        string                 `json:"raw,omitempty"`
+}
+
 // ListEventsMetadata carries pagination and count info for a list response.
 type ListEventsMetadata struct {
 	// Total is the count of matching events within the requested date window.
@@ -60,5 +78,24 @@ func ToEventResponse(e *domain.Event) *EventResponse {
 		Category:   e.Category,
 		Message:    e.Message,
 		Normalized: e.Normalized,
+	}
+}
+
+// ToEventDetailResponse converts a domain Event to its detail response form.
+func ToEventDetailResponse(e *domain.Event) *EventDetailResponse {
+	return &EventDetailResponse{
+		ID:         e.ID,
+		EventTime:  e.EventTime,
+		ReceivedAt: e.ReceivedAt,
+		AgentID:    e.AgentID,
+		Hostname:   e.Hostname,
+		SourceIP:   e.SourceIP,
+		InputType:  e.InputType,
+		Facility:   e.Facility,
+		Severity:   e.Severity,
+		Category:   e.Category,
+		Message:    e.Message,
+		Normalized: e.Normalized,
+		Raw:        e.Raw,
 	}
 }

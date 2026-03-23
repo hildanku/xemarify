@@ -1,14 +1,14 @@
-2<script lang="ts">
+<script lang="ts">
 	import { page } from '$app/stores'
 	import { createQuery } from '@tanstack/svelte-query'
-	import { clientFetch, type ApiResponseWithMetadata } from '$lib/client'
+	import { clientFetch, type ApiResponse, type ApiResponseWithMetadata } from '$lib/client'
 	import { V1_BASE_URL, type TableParams } from '$lib/constant'
 	import {
 		parseTableParams,
 		updateTableParams,
 		updateSearchParams,
 	} from '$lib/utils/table-params'
-	import type { EventItem } from '$lib/types/api'
+	import type { EventDetail, EventItem } from '$lib/types/api'
 	import Loading from '$lib/components/ui/custom/loading.svelte'
 	import Pagination from '$lib/components/ui/custom/pagination.svelte'
 	import LimitSelect from '$lib/components/ui/custom/limit-select.svelte'
@@ -17,6 +17,7 @@
 	import { Input } from '$lib/components/ui/input/index.js'
 	import * as Select from '$lib/components/ui/select/index.js'
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js'
+	import * as Dialog from '$lib/components/ui/dialog/index.js'
 	import SearchIcon from '@lucide/svelte/icons/search'
 	import CalendarIcon from '@lucide/svelte/icons/calendar'
 
@@ -32,6 +33,14 @@
 	const params = $derived(parseEventParams($page.url, tableParams))
 	let dateFrom = $state('')
 	let dateTo = $state('')
+	let selectedEventID = $state<string | null>(null)
+	let detailDialogOpen = $state(false)
+
+	$effect(() => {
+		if (!detailDialogOpen) {
+			selectedEventID = null
+		}
+	})
 
 	$effect(() => {
 		dateFrom = toDateInputValue(params.date_from)
@@ -50,6 +59,12 @@
 	const events = $derived(eventsQuery.data?.data.items ?? [])
 	const metadata = $derived(eventsQuery.data?.data.metadata)
 	const totalPages = $derived(metadata?.total_pages ?? 1)
+
+	const detailQuery = createQuery<ApiResponse<EventDetail>>(() => ({
+		queryKey: ['event-detail', selectedEventID],
+		enabled: !!selectedEventID,
+		queryFn: () => clientFetch<ApiResponse<EventDetail>>(`${V1_BASE_URL}/events/${selectedEventID}`, { method: 'GET' }),
+	}))
 
 	function parseEventParams(url: URL, table: TableParams): EventPageParams {
 		return {
@@ -132,6 +147,18 @@
 		dateFrom = ''
 		dateTo = ''
 		updateExtraParams({ date_from: '', date_to: '' })
+	}
+
+	function viewEvent(id: string) {
+		selectedEventID = id
+		detailDialogOpen = true
+	}
+
+	function stringifyNormalized(normalized: Record<string, unknown> | undefined): string {
+		if (!normalized || Object.keys(normalized).length === 0) {
+			return '-'
+		}
+		return JSON.stringify(normalized, null, 2)
 	}
 </script>
 
@@ -224,7 +251,7 @@
 				<span>No events found</span>
 			</div>
 		{:else}
-			<EventsDataTable data={events} {params} {onSortChange} />
+			<EventsDataTable data={events} {params} {onSortChange} onView={viewEvent} />
 		{/if}
 	</div>
 
@@ -232,4 +259,51 @@
 		<LimitSelect value={params.limit} onValueChange={(v) => handleLimitChange(String(v))} />
 		<Pagination page={params.page} {totalPages} onPageChange={gotoPage} />
 	</div>
+
+	<Dialog.Root bind:open={detailDialogOpen}>
+		<Dialog.Content class="max-w-4xl">
+			<Dialog.Header>
+				<Dialog.Title>Event Details</Dialog.Title>
+				<Dialog.Description>Inspect complete payload for the selected event.</Dialog.Description>
+			</Dialog.Header>
+
+			{#if selectedEventID}
+				{#if detailQuery.isPending}
+					<Loading label="Loading event details…" />
+				{:else if detailQuery.isError}
+					<div class="p-4 text-sm text-destructive">Failed to load event details: {detailQuery.error?.message}</div>
+				{:else if !detailQuery.data?.data}
+					<div class="p-4 text-sm text-muted-foreground">Event detail not found.</div>
+				{:else}
+					{@const detail = detailQuery.data.data}
+					<div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+						<div class="rounded-md border p-3 space-y-2">
+							<p><span class="text-muted-foreground">Event ID:</span> <span class="font-mono text-xs">{detail.id}</span></p>
+							<p><span class="text-muted-foreground">Agent ID:</span> <span class="font-mono text-xs">{detail.agent_id}</span></p>
+							<p><span class="text-muted-foreground">Hostname:</span> {detail.hostname || '-'}</p>
+							<p><span class="text-muted-foreground">Source IP:</span> {detail.source_ip || '-'}</p>
+							<p><span class="text-muted-foreground">Severity:</span> {detail.severity || '-'}</p>
+							<p><span class="text-muted-foreground">Category:</span> {detail.category || '-'}</p>
+						</div>
+						<div class="rounded-md border p-3 space-y-2">
+							<p><span class="text-muted-foreground">Event Time:</span> {detail.event_time}</p>
+							<p><span class="text-muted-foreground">Received At:</span> {detail.received_at}</p>
+							<p><span class="text-muted-foreground">Input Type:</span> {detail.input_type || '-'}</p>
+							<p><span class="text-muted-foreground">Facility:</span> {detail.facility || '-'}</p>
+							<p><span class="text-muted-foreground">Message:</span></p>
+							<p class="rounded bg-muted/50 px-2 py-1 break-words">{detail.message}</p>
+						</div>
+					</div>
+					<div class="mt-3 rounded-md border p-3">
+						<p class="text-sm text-muted-foreground mb-2">Normalized</p>
+						<pre class="text-xs max-h-48 overflow-auto rounded bg-muted/50 p-2 whitespace-pre-wrap break-words">{stringifyNormalized(detail.normalized)}</pre>
+					</div>
+					<div class="mt-3 rounded-md border p-3">
+						<p class="text-sm text-muted-foreground mb-2">Raw</p>
+						<pre class="text-xs max-h-48 overflow-auto rounded bg-muted/50 p-2 whitespace-pre-wrap break-words">{detail.raw || '-'}</pre>
+					</div>
+				{/if}
+			{/if}
+		</Dialog.Content>
+	</Dialog.Root>
 </div>

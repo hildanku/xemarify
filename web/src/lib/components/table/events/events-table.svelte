@@ -19,15 +19,18 @@
 	import type { TableParams } from '$lib/constant'
 	import { createRawSnippet } from 'svelte'
 	import CompactDate from '$lib/components/ui/custom/compact-date.svelte'
+	import EventRowActions from './event-row-actions.svelte'
 
 	let {
 		data,
 		params,
 		onSortChange,
+		onView,
 	}: {
 		data: EventItem[]
 		params: TableParams
 		onSortChange: (sort: string, order: 'asc' | 'desc') => void
+		onView: (id: string) => void
 	} = $props()
 
 	const cellSnippet = createRawSnippet<[{ value: string; class?: string }]>(
@@ -90,6 +93,12 @@
 					class: 'max-w-[560px] block truncate',
 				}),
 		},
+		{
+			id: 'actions',
+			enableSorting: false,
+			header: '',
+			cell: ({ row }) => renderComponent(EventRowActions, { event: row.original, onView }),
+		},
 	]
 
 	const sorting = $derived<SortingState>([{ id: params.sort, desc: params.order === 'desc' }])
@@ -129,7 +138,7 @@
 		{#each table.getHeaderGroups() as headerGroup (headerGroup.id)}
 			<Table.Row>
 				{#each headerGroup.headers as header (header.id)}
-					<Table.Head>
+						<Table.Head class={header.column.id === 'actions' ? 'w-28 text-right' : ''}>
 						{#if header.column.getCanSort()}
 							<button
 								type="button"
@@ -162,7 +171,7 @@
 			{#each table.getRowModel().rows as row (row.id)}
 				<Table.Row>
 					{#each row.getVisibleCells() as cell (cell.id)}
-						<Table.Cell>
+						<Table.Cell class={cell.column.id === 'actions' ? 'text-right' : ''}>
 							<FlexRender content={cell.column.columnDef.cell} context={cell.getContext()} />
 						</Table.Cell>
 					{/each}
