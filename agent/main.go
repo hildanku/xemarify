@@ -92,7 +92,23 @@ func main() {
 	go pipeline.RunHeartbeat(ctx, client, cfg.Server.Endpoint, cfg.Agent.ID, cfg.Agent.Key, 60*time.Second, &eventsDelivered, startedAt)
 	go collector.RunSyslogUDP(ctx, cfg.Syslog.Listen, hostname, eventCh)
 
-	log.Printf("xemarify-agent started: endpoint=%s syslog_listen=%s", cfg.Server.Endpoint, cfg.Syslog.Listen)
+	if cfg.FileLog.Enabled && len(cfg.FileLog.Paths) > 0 {
+		go collector.RunFileLog(ctx, cfg.FileLog.Paths, hostname, eventCh, cfg.FileLog.PollInterval)
+	}
+
+	if cfg.Inventory.Enabled {
+		go collector.RunInventory(ctx, hostname, eventCh, cfg.Inventory.Interval)
+	}
+
+	log.Printf(
+		"xemarify-agent started: endpoint=%s syslog_listen=%s filelog_enabled=%t filelog_paths=%d inventory_enabled=%t inventory_interval=%s",
+		cfg.Server.Endpoint,
+		cfg.Syslog.Listen,
+		cfg.FileLog.Enabled,
+		len(cfg.FileLog.Paths),
+		cfg.Inventory.Enabled,
+		cfg.Inventory.Interval,
+	)
 	<-ctx.Done()
 	log.Println("xemarify-agent shutting down")
 }

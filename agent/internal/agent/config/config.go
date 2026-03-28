@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -17,6 +18,15 @@ type Config struct {
 		Key      string `yaml:"key"`
 		AgentKey string `yaml:"agent_key"`
 	} `yaml:"agent"`
+	FileLog struct {
+		Enabled      bool          `yaml:"enabled"`
+		Paths        []string      `yaml:"paths"`
+		PollInterval time.Duration `yaml:"poll_interval"`
+	} `yaml:"filelog"`
+	Inventory struct {
+		Enabled  bool          `yaml:"enabled"`
+		Interval time.Duration `yaml:"interval"`
+	} `yaml:"inventory"`
 	Syslog struct {
 		Listen string `yaml:"listen"`
 	} `yaml:"syslog"`
@@ -35,6 +45,14 @@ func Load(path string) (*Config, error) {
 
 	if cfg.Syslog.Listen == "" {
 		cfg.Syslog.Listen = ":5514"
+	}
+
+	if cfg.FileLog.PollInterval <= 0 {
+		cfg.FileLog.PollInterval = 1 * time.Second
+	}
+
+	if cfg.Inventory.Interval <= 0 {
+		cfg.Inventory.Interval = 5 * time.Minute
 	}
 
 	return &cfg, nil
