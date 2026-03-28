@@ -1,18 +1,20 @@
 package collector
 
 import (
-	"bufio"
 	"context"
 	"log"
 	"net"
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/hildanku/xemarify-agent/internal/agent/model"
+	"github.com/shirou/gopsutil/v4/cpu"
+	"github.com/shirou/gopsutil/v4/host"
+	"github.com/shirou/gopsutil/v4/mem"
+	gnet "github.com/shirou/gopsutil/v4/net"
 )
 
 func RunInventory(
@@ -65,7 +67,7 @@ func buildInventoryEvent(hostname string) model.IngestEvent {
 		"kernel_version":      kernelVersion(),
 		"ip_addresses":        listIPAddresses(),
 		"cpu_model":           cpuModel(),
-		"cpu_cores":           runtime.NumCPU(),
+		"cpu_cores":           cpuCores(),
 		"memory_total_mb":     memoryTotalMB(),
 		"uptime_seconds":      uptimeSeconds(),
 		"nginx_installed":     binaryExists("nginx"),
@@ -94,27 +96,22 @@ func inventorySummary(fields map[string]interface{}) string {
 }
 
 func listIPAddresses() []string {
-	interfaces, err := net.Interfaces()
+	interfaces, err := gnet.Interfaces()
 	if err != nil {
 		return nil
 	}
 
 	ips := make([]string, 0, 8)
 	for _, iface := range interfaces {
-		if (iface.Flags & net.FlagUp) == 0 {
+		if !hasNetFlag(iface.Flags, "up") {
 			continue
 		}
-		if (iface.Flags & net.FlagLoopback) != 0 {
-			continue
-		}
-
-		addrs, err := iface.Addrs()
-		if err != nil {
+		if hasNetFlag(iface.Flags, "loopback") {
 			continue
 		}
 
-		for _, addr := range addrs {
-			ipStr := hostFromCIDR(addr.String())
+		for _, addr := range iface.Addrs {
+			ipStr := hostFromCIDR(addr.Addr)
 			if ipStr == "" {
 				continue
 			}
@@ -123,6 +120,19 @@ func listIPAddresses() []string {
 	}
 
 	return dedupStrings(ips)
+}
+
+func hasNetFlag(flags []string, want string) bool {
+	want = strings.ToLower(strings.TrimSpace(want))
+	if want == "" {
+		return false
+	}
+	for _, flag := range flags {
+		if strings.ToLower(strings.TrimSpace(flag)) == want {
+			return true
+		}
+	}
+	return false
 }
 
 func hostFromCIDR(value string) string {
@@ -154,78 +164,46 @@ func dedupStrings(items []string) []string {
 }
 
 func kernelVersion() string {
-	data, err := os.ReadFile("/proc/sys/kernel/osrelease")
+	info, err := host.Info()
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(string(data))
+	return strings.TrimSpace(info.KernelVersion)
 }
 
 func cpuModel() string {
-	f, err := os.Open("/proc/cpuinfo")
+	infos, err := cpu.Info()
 	if err != nil {
 		return ""
 	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if !strings.Contains(line, ":") {
-			continue
-		}
-		parts := strings.SplitN(line, ":", 2)
-		key := strings.TrimSpace(strings.ToLower(parts[0]))
-		if key != "model name" {
-			continue
-		}
-		return strings.TrimSpace(parts[1])
+	if len(infos) == 0 {
+		return ""
 	}
+	return strings.TrimSpace(infos[0].ModelName)
+}
 
-	return ""
+func cpuCores() int {
+	count, err := cpu.Counts(true)
+	if err != nil || count <= 0 {
+		return runtime.NumCPU()
+	}
+	return count
 }
 
 func memoryTotalMB() int64 {
-	f, err := os.Open("/proc/meminfo")
+	vm, err := mem.VirtualMemory()
 	if err != nil {
 		return 0
 	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "MemTotal:") {
-			continue
-		}
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			return 0
-		}
-		valueKB, err := strconv.ParseInt(fields[1], 10, 64)
-		if err != nil {
-			return 0
-		}
-		return valueKB / 1024
-	}
-
-	return 0
+	return int64(vm.Total / (1024 * 1024))
 }
 
 func uptimeSeconds() int64 {
-	data, err := os.ReadFile("/proc/uptime")
+	info, err := host.Info()
 	if err != nil {
 		return 0
 	}
-	fields := strings.Fields(string(data))
-	if len(fields) < 1 {
-		return 0
-	}
-	value, err := strconv.ParseFloat(fields[0], 64)
-	if err != nil {
-		return 0
-	}
-	return int64(value)
+	return int64(info.Uptime)
 }
 
 func binaryExists(name string) bool {
