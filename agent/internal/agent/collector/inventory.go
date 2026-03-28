@@ -59,8 +59,11 @@ func buildInventoryEvent(hostname string) model.IngestEvent {
 	}
 
 	now := time.Now().UTC()
+	sourceName := "inventory:host"
 	normalized := map[string]interface{}{
 		"event_type":          "inventory",
+		"source_type":         "inventory",
+		"source_name":         sourceName,
 		"hostname":            hostname,
 		"os":                  runtime.GOOS,
 		"arch":                runtime.GOARCH,
@@ -82,11 +85,13 @@ func buildInventoryEvent(hostname string) model.IngestEvent {
 		Hostname:   hostname,
 		SourceIP:   "",
 		InputType:  "inventory",
+		SourceName: sourceName,
 		Facility:   "inventory",
 		Severity:   "INFO",
 		Category:   "inventory",
 		Message:    "inventory snapshot",
 		Raw:        raw,
+		Attributes: normalized,
 		Normalized: normalized,
 	}
 }

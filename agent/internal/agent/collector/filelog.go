@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -70,21 +71,33 @@ func RunFileLog(
 					}
 
 					severity := guessSeverity(msg)
+					sourceName := service + ":" + filepath.Base(path)
+					attributes := map[string]interface{}{
+						"source_type": "filelog",
+						"source_name": sourceName,
+						"file_path":   path,
+						"service":     service,
+						"severity":    severity,
+					}
 					event := model.IngestEvent{
-						EventTime: time.Now().UTC(),
-						Hostname:  hostname,
-						SourceIP:  "",
-						InputType: "filelog",
-						Facility:  service,
-						Severity:  severity,
-						Category:  "web_log",
-						Message:   msg,
-						Raw:       msg,
+						EventTime:  time.Now().UTC(),
+						Hostname:   hostname,
+						SourceIP:   "",
+						InputType:  "filelog",
+						SourceName: sourceName,
+						Facility:   service,
+						Severity:   severity,
+						Category:   "web_log",
+						Message:    msg,
+						Raw:        msg,
+						Attributes: attributes,
 						Normalized: map[string]interface{}{
-							"event_type": "filelog",
-							"file_path":  path,
-							"service":    service,
-							"severity":   severity,
+							"event_type":  "filelog",
+							"source_type": "filelog",
+							"source_name": sourceName,
+							"file_path":   path,
+							"service":     service,
+							"severity":    severity,
 						},
 					}
 
@@ -165,10 +178,10 @@ func detectService(path string) string {
 func guessSeverity(message string) string {
 	m := strings.ToLower(message)
 	switch {
-	case strings.Contains(m, "error"):
-		return "ERROR"
+	case strings.Contains(m, "error"), strings.Contains(m, "fatal"), strings.Contains(m, "panic"), strings.Contains(m, "crit"):
+		return "HIGH"
 	case strings.Contains(m, "warn"):
-		return "WARN"
+		return "MEDIUM"
 	default:
 		return "INFO"
 	}

@@ -41,21 +41,30 @@ func RunSyslogUDP(ctx context.Context, listenAddr, hostname string, output chan<
 		}
 
 		sourceIP := parseSourceIP(remoteAddr)
+		sourceName := "udp:" + listenAddr
+		attributes := map[string]interface{}{
+			"source_ip":   sourceIP,
+			"source_name": sourceName,
+		}
 		event := model.IngestEvent{
-			EventTime: time.Now().UTC(),
-			Hostname:  hostname,
-			SourceIP:  sourceIP,
-			InputType: "syslog",
-			Facility:  "syslog",
-			Severity:  "INFO",
-			Category:  "syslog",
-			Message:   message,
-			Raw:       message,
+			EventTime:  time.Now().UTC(),
+			Hostname:   hostname,
+			SourceIP:   sourceIP,
+			InputType:  "syslog",
+			SourceName: sourceName,
+			Facility:   "syslog",
+			Severity:   "INFO",
+			Category:   "syslog",
+			Message:    message,
+			Raw:        message,
+			Attributes: attributes,
 			Normalized: map[string]interface{}{
-				"event_type": "syslog",
-				"source_ip":  sourceIP,
-				"severity":   "INFO",
-				"category":   "syslog",
+				"event_type":  "syslog",
+				"source_ip":   sourceIP,
+				"source_name": sourceName,
+				"source_type": "syslog",
+				"severity":    "INFO",
+				"category":    "syslog",
 			},
 		}
 

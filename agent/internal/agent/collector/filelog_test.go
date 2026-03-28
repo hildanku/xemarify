@@ -42,8 +42,8 @@ func TestGuessSeverity(t *testing.T) {
 		want string
 	}{
 		{msg: "request completed", want: "INFO"},
-		{msg: "WARN upstream timeout", want: "WARN"},
-		{msg: "database ERROR connection refused", want: "ERROR"},
+		{msg: "WARN upstream timeout", want: "MEDIUM"},
+		{msg: "database ERROR connection refused", want: "HIGH"},
 	}
 
 	for _, testCase := range tests {
@@ -166,8 +166,17 @@ func TestRunFileLog_EmitsOnlyNewLines(t *testing.T) {
 		if event.Facility != "nginx" {
 			t.Fatalf("unexpected facility: %s", event.Facility)
 		}
-		if event.Severity != "WARN" {
+		if event.Severity != "MEDIUM" {
 			t.Fatalf("unexpected severity: %s", event.Severity)
+		}
+		if event.SourceName == "" {
+			t.Fatal("source_name should not be empty")
+		}
+		if event.Attributes == nil {
+			t.Fatal("attributes should not be nil")
+		}
+		if event.Attributes["source_type"] != "filelog" {
+			t.Fatalf("unexpected attributes.source_type: %#v", event.Attributes["source_type"])
 		}
 		if event.Message != "WARN new-line" {
 			t.Fatalf("unexpected message: %s", event.Message)

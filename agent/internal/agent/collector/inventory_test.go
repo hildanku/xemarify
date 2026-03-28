@@ -65,8 +65,17 @@ func TestBuildInventoryEvent_BasicShape(t *testing.T) {
 	if event.Hostname != "test-host" {
 		t.Fatalf("unexpected hostname: %s", event.Hostname)
 	}
+	if event.SourceName == "" {
+		t.Fatal("source_name should not be empty")
+	}
 	if event.Message == "" {
 		t.Fatal("message should not be empty")
+	}
+	if event.Attributes == nil {
+		t.Fatal("attributes should not be nil")
+	}
+	if event.Attributes["source_type"] != "inventory" {
+		t.Fatalf("unexpected attributes.source_type: %#v", event.Attributes["source_type"])
 	}
 
 	if event.Normalized == nil {

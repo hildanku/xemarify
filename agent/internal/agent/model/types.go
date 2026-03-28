@@ -31,10 +31,12 @@ type IngestEvent struct {
 	Hostname   string                 `json:"hostname"`
 	SourceIP   string                 `json:"source_ip"`
 	InputType  string                 `json:"input_type"`
+	SourceName string                 `json:"source_name,omitempty"`
 	Facility   string                 `json:"facility"`
 	Severity   string                 `json:"severity"`
 	Category   string                 `json:"category"`
 	Message    string                 `json:"message"`
+	Attributes map[string]interface{} `json:"attributes,omitempty"`
 	Normalized map[string]interface{} `json:"normalized"`
 	Raw        string                 `json:"raw"`
 }
