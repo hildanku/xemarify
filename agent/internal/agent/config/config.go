@@ -13,6 +13,10 @@ type Config struct {
 		Endpoint string `yaml:"endpoint"`
 		Insecure bool   `yaml:"insecure"`
 	} `yaml:"server"`
+	DiskBuffer struct {
+		Path     string `yaml:"path"`
+		MaxBytes int64  `yaml:"max_bytes"`
+	} `yaml:"disk_buffer"`
 	Agent struct {
 		ID       string `yaml:"id"`
 		Key      string `yaml:"key"`
@@ -53,6 +57,14 @@ func Load(path string) (*Config, error) {
 
 	if cfg.Inventory.Interval <= 0 {
 		cfg.Inventory.Interval = 5 * time.Minute
+	}
+
+	if cfg.DiskBuffer.Path == "" {
+		cfg.DiskBuffer.Path = "/var/lib/xemarify-agent/spool/events.log"
+	}
+
+	if cfg.DiskBuffer.MaxBytes <= 0 {
+		cfg.DiskBuffer.MaxBytes = 500 * 1024 * 1024
 	}
 
 	return &cfg, nil

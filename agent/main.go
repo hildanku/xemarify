@@ -81,7 +81,10 @@ func main() {
 	var eventsDelivered atomic.Int64
 	startedAt := time.Now()
 	eventCh := make(chan model.IngestEvent, 2048)
-	queue := pipeline.NewMemoryQueue()
+	queue, err := pipeline.NewDiskBackedQueue(cfg.DiskBuffer.Path, cfg.DiskBuffer.MaxBytes)
+	if err != nil {
+		log.Fatalf("failed to initialize disk buffer queue: %v", err)
+	}
 	retryPolicy := pipeline.ExponentialBackoffPolicy{
 		BaseDelay: retryBaseDelay,
 		MaxDelay:  retryMaxDelay,
@@ -101,13 +104,15 @@ func main() {
 	}
 
 	log.Printf(
-		"xemarify-agent started: endpoint=%s syslog_listen=%s filelog_enabled=%t filelog_paths=%d inventory_enabled=%t inventory_interval=%s",
+		"xemarify-agent started: endpoint=%s syslog_listen=%s filelog_enabled=%t filelog_paths=%d inventory_enabled=%t inventory_interval=%s disk_buffer_path=%s disk_buffer_max_bytes=%d",
 		cfg.Server.Endpoint,
 		cfg.Syslog.Listen,
 		cfg.FileLog.Enabled,
 		len(cfg.FileLog.Paths),
 		cfg.Inventory.Enabled,
 		cfg.Inventory.Interval,
+		cfg.DiskBuffer.Path,
+		cfg.DiskBuffer.MaxBytes,
 	)
 	<-ctx.Done()
 	log.Println("xemarify-agent shutting down")
