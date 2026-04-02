@@ -123,7 +123,7 @@
 	<div class="flex flex-wrap items-center justify-between gap-3">
 		<div>
 			<h1 class="text-3xl font-bold tracking-tight">Detection Rules</h1>
-			<p class="text-muted-foreground">Manage threshold detection rules for SIEM alerts</p>
+			<p class="text-muted-foreground">Manage threshold, sequence, correlation, and anomaly detection rules</p>
 		</div>
 		<RuleUpsertDialog mode="create" onCreate={handleCreate} isPending={createRuleMutation.isPending} />
 	</div>

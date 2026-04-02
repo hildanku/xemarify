@@ -90,5 +90,19 @@ func (b *PGAlertBuilder) Persist(ctx context.Context, alert *Alert) error {
 		return err
 	}
 
+	// Keep a lightweight evaluation trail for triggered matches.
+	const insertRuleEvaluation = `
+		INSERT INTO rule_evaluations (rule_id, event_id, received_at, created_at)
+		VALUES ($1, $2, $3, NOW())
+	`
+
+	if _, err := tx.Exec(ctx, insertRuleEvaluation,
+		alert.RuleID,
+		alert.EventID,
+		alert.ReceivedAt,
+	); err != nil {
+		return err
+	}
+
 	return tx.Commit(ctx)
 }

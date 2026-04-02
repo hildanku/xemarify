@@ -9,11 +9,18 @@ import (
 
 // RuleCondition is the detection logic stored as JSONB in the rules table.
 type RuleCondition struct {
-	EventType string   `json:"event_type"`
-	GroupBy   []string `json:"group_by"`
-	Threshold int      `json:"threshold"`
-	WindowSec int      `json:"window_sec"`
-	Severity  string   `json:"severity,omitempty"`
+	Type                  string   `json:"type,omitempty"`
+	EventType             string   `json:"event_type,omitempty"`
+	GroupBy               []string `json:"group_by"`
+	Threshold             int      `json:"threshold,omitempty"`
+	WindowSec             int      `json:"window_sec,omitempty"`
+	Severity              string   `json:"severity,omitempty"`
+	SequenceSteps         []string `json:"sequence_steps,omitempty"`
+	CorrelationEventTypes []string `json:"correlation_event_types,omitempty"`
+	MinDistinctEventTypes int      `json:"min_distinct_event_types,omitempty"`
+	BaselineWindowSec     int      `json:"baseline_window_sec,omitempty"`
+	SpikeFactor           float64  `json:"spike_factor,omitempty"`
+	AnomalyMinCount       int      `json:"anomaly_min_count,omitempty"`
 }
 
 // Rule is the domain representation of a detection rule.

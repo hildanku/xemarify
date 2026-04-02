@@ -148,7 +148,7 @@ func stringifyValue(value interface{}) string {
 
 func normalizeGroupField(field string) string {
 	normalized := strings.ToLower(strings.TrimSpace(field))
-	if normalized == "src_ip" {
+	if normalized == "src_ip" || normalized == "ip" {
 		return "source_ip"
 	}
 	return normalized

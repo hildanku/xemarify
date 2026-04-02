@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/google/uuid"
@@ -18,11 +19,17 @@ var ErrInvalidRuleCondition = errors.New("invalid rule condition")
 var validGroupByFields = map[string]struct{}{
 	"src_ip":     {},
 	"source_ip":  {},
+	"ip":         {},
 	"hostname":   {},
 	"severity":   {},
 	"category":   {},
 	"facility":   {},
 	"input_type": {},
+	"agent_id":   {},
+	"user":       {},
+	"user_id":    {},
+	"asset":      {},
+	"asset_id":   {},
 }
 
 // RuleService orchestrates rule business logic.
@@ -157,14 +164,65 @@ func (s *RuleService) Delete(ctx context.Context, id uuid.UUID) error {
 }
 
 func validateCondition(condition domain.RuleCondition) error {
-	if strings.TrimSpace(condition.EventType) == "" {
-		return fmt.Errorf("%w: event_type must not be empty", ErrInvalidRuleCondition)
+	ruleType := strings.ToLower(strings.TrimSpace(condition.Type))
+	if ruleType == "" {
+		ruleType = "threshold"
 	}
-	if condition.Threshold <= 0 {
-		return fmt.Errorf("%w: threshold must be > 0", ErrInvalidRuleCondition)
-	}
+
 	if condition.WindowSec <= 0 {
 		return fmt.Errorf("%w: window_sec must be > 0", ErrInvalidRuleCondition)
+	}
+
+	switch ruleType {
+	case "threshold":
+		if strings.TrimSpace(condition.EventType) == "" {
+			return fmt.Errorf("%w: event_type must not be empty", ErrInvalidRuleCondition)
+		}
+		if condition.Threshold <= 0 {
+			return fmt.Errorf("%w: threshold must be > 0", ErrInvalidRuleCondition)
+		}
+	case "sequence":
+		if len(condition.SequenceSteps) < 2 {
+			return fmt.Errorf("%w: sequence_steps must contain at least 2 event types", ErrInvalidRuleCondition)
+		}
+		for _, step := range condition.SequenceSteps {
+			if strings.TrimSpace(step) == "" {
+				return fmt.Errorf("%w: sequence_steps must not contain empty values", ErrInvalidRuleCondition)
+			}
+		}
+	case "correlation":
+		if len(condition.CorrelationEventTypes) < 2 {
+			return fmt.Errorf("%w: correlation_event_types must contain at least 2 event types", ErrInvalidRuleCondition)
+		}
+		for _, eventType := range condition.CorrelationEventTypes {
+			if strings.TrimSpace(eventType) == "" {
+				return fmt.Errorf("%w: correlation_event_types must not contain empty values", ErrInvalidRuleCondition)
+			}
+		}
+		if condition.MinDistinctEventTypes <= 0 {
+			return fmt.Errorf("%w: min_distinct_event_types must be > 0", ErrInvalidRuleCondition)
+		}
+		if condition.MinDistinctEventTypes > len(condition.CorrelationEventTypes) {
+			return fmt.Errorf("%w: min_distinct_event_types cannot exceed correlation_event_types length", ErrInvalidRuleCondition)
+		}
+		if condition.Threshold <= 0 {
+			return fmt.Errorf("%w: threshold must be > 0", ErrInvalidRuleCondition)
+		}
+	case "anomaly":
+		if strings.TrimSpace(condition.EventType) == "" {
+			return fmt.Errorf("%w: event_type must not be empty", ErrInvalidRuleCondition)
+		}
+		if condition.BaselineWindowSec <= 0 {
+			return fmt.Errorf("%w: baseline_window_sec must be > 0", ErrInvalidRuleCondition)
+		}
+		if condition.SpikeFactor <= 1 || math.IsNaN(condition.SpikeFactor) || math.IsInf(condition.SpikeFactor, 0) {
+			return fmt.Errorf("%w: spike_factor must be > 1", ErrInvalidRuleCondition)
+		}
+		if condition.AnomalyMinCount <= 0 {
+			return fmt.Errorf("%w: anomaly_min_count must be > 0", ErrInvalidRuleCondition)
+		}
+	default:
+		return fmt.Errorf("%w: unsupported type %q", ErrInvalidRuleCondition, condition.Type)
 	}
 
 	for _, field := range condition.GroupBy {

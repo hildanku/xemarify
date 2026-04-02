@@ -62,17 +62,57 @@
 			cell: ({ row }) => renderComponent(RuleLevelBadge, { level: row.original.level }),
 		},
 		{
+			id: 'type',
+			header: 'Type',
+			enableSorting: false,
+			cell: ({ row }) =>
+				renderSnippet(cellSnippet, {
+					value: (row.original.condition.type ?? 'threshold').toUpperCase(),
+					class: 'font-mono',
+				}),
+		},
+		{
 			id: 'event_type',
 			accessorKey: 'condition.event_type',
 			header: 'Event Type',
 			enableSorting: false,
-			cell: ({ row }) => renderSnippet(cellSnippet, { value: row.original.condition.event_type, class: 'font-mono' }),
+			cell: ({ row }) => {
+				const condition = row.original.condition
+				const ruleType = condition.type ?? 'threshold'
+				if (ruleType === 'sequence') {
+					return renderSnippet(cellSnippet, {
+						value: (condition.sequence_steps ?? []).join(' → ') || '—',
+						class: 'font-mono',
+					})
+				}
+				if (ruleType === 'correlation') {
+					return renderSnippet(cellSnippet, {
+						value: (condition.correlation_event_types ?? []).join(', ') || '—',
+						class: 'font-mono',
+					})
+				}
+				return renderSnippet(cellSnippet, { value: condition.event_type ?? '—', class: 'font-mono' })
+			},
 		},
 		{
-			id: 'threshold',
-			header: 'Threshold',
+			id: 'logic',
+			header: 'Logic',
 			enableSorting: false,
-			cell: ({ row }) => renderSnippet(cellSnippet, { value: `${row.original.condition.threshold}/${row.original.condition.window_sec}s` }),
+			cell: ({ row }) => {
+				const condition = row.original.condition
+				const ruleType = condition.type ?? 'threshold'
+				if (ruleType === 'anomaly') {
+					return renderSnippet(cellSnippet, {
+						value: `baseline ${condition.baseline_window_sec ?? 0}s × ${condition.spike_factor ?? 0} (min ${condition.anomaly_min_count ?? 0})`,
+					})
+				}
+				if (ruleType === 'correlation') {
+					return renderSnippet(cellSnippet, {
+						value: `${condition.threshold ?? 0}/${condition.window_sec ?? 0}s, min distinct ${condition.min_distinct_event_types ?? 0}`,
+					})
+				}
+				return renderSnippet(cellSnippet, { value: `${condition.threshold ?? '—'}/${condition.window_sec ?? 0}s` })
+			},
 		},
 		{
 			id: 'enabled',

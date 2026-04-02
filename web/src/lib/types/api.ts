@@ -60,11 +60,18 @@ export type RuleSeverity = 'INFO' | 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
 export type AlertStatus = 'new' | 'acknowledged' | 'closed'
 
 export interface RuleCondition {
-	event_type: string
+	type?: 'threshold' | 'sequence' | 'correlation' | 'anomaly'
+	event_type?: string
 	group_by: string[]
-	threshold: number
-	window_sec: number
+	threshold?: number
+	window_sec?: number
 	severity?: RuleSeverity
+	sequence_steps?: string[]
+	correlation_event_types?: string[]
+	min_distinct_event_types?: number
+	baseline_window_sec?: number
+	spike_factor?: number
+	anomaly_min_count?: number
 }
 
 export interface Rule {

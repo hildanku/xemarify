@@ -112,11 +112,18 @@ func (h *RuleHandler) Create(c *gin.Context) {
 		Level:       req.Level,
 		Enabled:     req.Enabled,
 		Condition: domain.RuleCondition{
-			EventType: req.Condition.EventType,
-			GroupBy:   req.Condition.GroupBy,
-			Threshold: req.Condition.Threshold,
-			WindowSec: req.Condition.WindowSec,
-			Severity:  req.Condition.Severity,
+			Type:                  req.Condition.Type,
+			EventType:             req.Condition.EventType,
+			GroupBy:               req.Condition.GroupBy,
+			Threshold:             req.Condition.Threshold,
+			WindowSec:             req.Condition.WindowSec,
+			Severity:              req.Condition.Severity,
+			SequenceSteps:         req.Condition.SequenceSteps,
+			CorrelationEventTypes: req.Condition.CorrelationEventTypes,
+			MinDistinctEventTypes: req.Condition.MinDistinctEventTypes,
+			BaselineWindowSec:     req.Condition.BaselineWindowSec,
+			SpikeFactor:           req.Condition.SpikeFactor,
+			AnomalyMinCount:       req.Condition.AnomalyMinCount,
 		},
 		Tags: tags,
 	})
@@ -178,11 +185,18 @@ func (h *RuleHandler) Update(c *gin.Context) {
 	}
 	if req.Condition != nil {
 		cond := &domain.RuleCondition{
-			EventType: req.Condition.EventType,
-			GroupBy:   req.Condition.GroupBy,
-			Threshold: req.Condition.Threshold,
-			WindowSec: req.Condition.WindowSec,
-			Severity:  req.Condition.Severity,
+			Type:                  req.Condition.Type,
+			EventType:             req.Condition.EventType,
+			GroupBy:               req.Condition.GroupBy,
+			Threshold:             req.Condition.Threshold,
+			WindowSec:             req.Condition.WindowSec,
+			Severity:              req.Condition.Severity,
+			SequenceSteps:         req.Condition.SequenceSteps,
+			CorrelationEventTypes: req.Condition.CorrelationEventTypes,
+			MinDistinctEventTypes: req.Condition.MinDistinctEventTypes,
+			BaselineWindowSec:     req.Condition.BaselineWindowSec,
+			SpikeFactor:           req.Condition.SpikeFactor,
+			AnomalyMinCount:       req.Condition.AnomalyMinCount,
 		}
 		input.Condition = cond
 	}

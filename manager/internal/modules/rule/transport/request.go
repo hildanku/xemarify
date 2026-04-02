@@ -15,11 +15,18 @@ type ListRulesQuery struct {
 
 // RuleConditionRequest is the JSON body for a rule condition.
 type RuleConditionRequest struct {
-	EventType string   `json:"event_type" binding:"required"`
-	GroupBy   []string `json:"group_by"`
-	Threshold int      `json:"threshold"  binding:"required,min=1"`
-	WindowSec int      `json:"window_sec" binding:"required,min=1"`
-	Severity  string   `json:"severity"   binding:"omitempty,oneof=INFO LOW MEDIUM HIGH CRITICAL"`
+	Type                  string   `json:"type"                     binding:"omitempty,oneof=threshold sequence correlation anomaly"`
+	EventType             string   `json:"event_type"`
+	GroupBy               []string `json:"group_by"`
+	Threshold             int      `json:"threshold"`
+	WindowSec             int      `json:"window_sec"`
+	Severity              string   `json:"severity"                 binding:"omitempty,oneof=INFO LOW MEDIUM HIGH CRITICAL"`
+	SequenceSteps         []string `json:"sequence_steps"`
+	CorrelationEventTypes []string `json:"correlation_event_types"`
+	MinDistinctEventTypes int      `json:"min_distinct_event_types"`
+	BaselineWindowSec     int      `json:"baseline_window_sec"`
+	SpikeFactor           float64  `json:"spike_factor"`
+	AnomalyMinCount       int      `json:"anomaly_min_count"`
 }
 
 // CreateRuleRequest is the JSON body for POST /api/v1/rules.
