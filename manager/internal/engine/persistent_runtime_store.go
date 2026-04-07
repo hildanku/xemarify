@@ -156,6 +156,56 @@ func (s *persistentRuntimeStore) tryAcquireAlertDedup(ctx context.Context, dedup
 	return cmd.RowsAffected() == 1, nil
 }
 
+func (s *persistentRuntimeStore) recordRuleEvaluation(
+	ctx context.Context,
+	ruleID uuid.UUID,
+	eventID uuid.UUID,
+	receivedAt time.Time,
+	matched bool,
+	reason string,
+	correlationKey string,
+	evaluationDetails map[string]any,
+) error {
+	if receivedAt.IsZero() {
+		receivedAt = time.Now().UTC()
+	}
+
+	if evaluationDetails == nil {
+		evaluationDetails = map[string]any{}
+	}
+
+	payload, err := json.Marshal(evaluationDetails)
+	if err != nil {
+		return err
+	}
+
+	const q = `
+		INSERT INTO rule_evaluations (
+			rule_id,
+			event_id,
+			received_at,
+			matched,
+			reason,
+			correlation_key,
+			evaluation_details,
+			evaluated_at,
+			created_at
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+	`
+
+	_, err = s.db.Exec(ctx, q,
+		ruleID,
+		eventID,
+		receivedAt,
+		matched,
+		reason,
+		correlationKey,
+		payload,
+	)
+	return err
+}
+
 func (s *persistentRuntimeStore) saveCheckpoint(ctx context.Context, checkpoint runtimeCheckpoint) error {
 	const q = `
 		INSERT INTO engine_processing_checkpoint (engine_name, last_event_id, last_event_time, updated_at)

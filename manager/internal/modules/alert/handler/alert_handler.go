@@ -139,8 +139,9 @@ func (h *AlertHandler) GetByID(c *gin.Context) {
 	}
 
 	response.Write(c, http.StatusOK, "alert retrieved", transport.AlertDetailResponse{
-		Alert:  transport.ToAlertResponse(detail.Alert),
-		Events: events,
+		Alert:       transport.ToAlertResponse(detail.Alert),
+		Events:      events,
+		Explanation: transport.ToAlertExplanationResponse(detail.Explanation),
 	})
 }
 

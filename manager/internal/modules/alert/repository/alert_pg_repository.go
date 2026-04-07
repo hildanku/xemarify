@@ -198,6 +198,47 @@ func (r *pgAlertRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.
 		return nil, err
 	}
 
+	const explainQ = `
+		SELECT re.matched,
+		       COALESCE(re.reason, ''),
+		       COALESCE(re.correlation_key, ''),
+		       COALESCE(re.evaluated_at, re.created_at),
+		       re.evaluation_details
+		FROM alerts a
+		JOIN alert_events ae
+		  ON ae.alert_id = a.id
+		JOIN rule_evaluations re
+		  ON re.rule_id = a.rule_id
+		 AND re.event_id = ae.event_id
+		 AND re.received_at = ae.received_at
+		WHERE a.id = $1
+		  AND re.matched = TRUE
+		ORDER BY COALESCE(re.evaluated_at, re.created_at) DESC
+		LIMIT 1
+	`
+
+	var explanation domain.AlertExplanation
+	var explanationDetails []byte
+	explainErr := r.db.QueryRow(ctx, explainQ, id).Scan(
+		&explanation.Matched,
+		&explanation.Reason,
+		&explanation.CorrelationKey,
+		&explanation.EvaluatedAt,
+		&explanationDetails,
+	)
+	if explainErr != nil && !errors.Is(explainErr, pgx.ErrNoRows) {
+		return nil, explainErr
+	}
+
+	if explainErr == nil {
+		if explanationDetails != nil {
+			if err := json.Unmarshal(explanationDetails, &explanation.Details); err != nil {
+				return nil, err
+			}
+		}
+		return &domain.AlertDetail{Alert: alert, Events: events, Explanation: &explanation}, nil
+	}
+
 	return &domain.AlertDetail{Alert: alert, Events: events}, nil
 }
 

@@ -40,6 +40,15 @@ type AlertEvent struct {
 }
 
 type AlertDetail struct {
-	Alert  *Alert
-	Events []*AlertEvent
+	Alert       *Alert
+	Events      []*AlertEvent
+	Explanation *AlertExplanation
+}
+
+type AlertExplanation struct {
+	Matched        bool
+	Reason         string
+	CorrelationKey string
+	EvaluatedAt    time.Time
+	Details        map[string]interface{}
 }

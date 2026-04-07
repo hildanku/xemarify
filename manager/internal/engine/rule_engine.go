@@ -142,13 +142,54 @@ func (e *RuleEngine) ProcessEvent(ctx context.Context, event *eventDomain.Event)
 	e.metrics.RulesEvaluatedTotal.Add(float64(len(rules)))
 
 	for _, rule := range rules {
+		receivedAt := event.ReceivedAt
+		if receivedAt.IsZero() {
+			receivedAt = time.Now().UTC()
+		}
+
 		correlationKey, ok := BuildCorrelationKey(rule, event, e.matcher)
 		if !ok {
+			if evalErr := e.persistence.recordRuleEvaluation(
+				ctx,
+				rule.ID,
+				event.ID,
+				receivedAt,
+				false,
+				"correlation_key_unresolved",
+				"",
+				map[string]any{"rule_type": rule.Type},
+			); evalErr != nil {
+				e.log.WithError(evalErr).WithFields(logrus.Fields{
+					"rule_id":  rule.ID,
+					"event_id": event.ID,
+				}).Warn("failed to persist rule evaluation")
+			}
 			continue
 		}
 		stateKey := buildRuntimeStateKey(rule.ID.String(), correlationKey)
 
-		triggeredState, triggered := e.evaluateRule(ctx, rule, stateKey, correlationKey, event, eventType)
+		triggeredState, triggered, reason, details := e.evaluateRule(ctx, rule, stateKey, correlationKey, event, eventType)
+		if details == nil {
+			details = map[string]any{}
+		}
+		details["rule_type"] = rule.Type
+		if evalErr := e.persistence.recordRuleEvaluation(
+			ctx,
+			rule.ID,
+			event.ID,
+			receivedAt,
+			triggered,
+			reason,
+			correlationKey,
+			details,
+		); evalErr != nil {
+			e.log.WithError(evalErr).WithFields(logrus.Fields{
+				"rule_id":         rule.ID,
+				"event_id":        event.ID,
+				"correlation_key": correlationKey,
+				"matched":         triggered,
+			}).Warn("failed to persist rule evaluation")
+		}
 		if !triggered {
 			continue
 		}
@@ -201,7 +242,7 @@ func (e *RuleEngine) ProcessEvent(ctx context.Context, event *eventDomain.Event)
 }
 
 // evaluateRule executes one rule by type and returns synthesized state for alert payload.
-func (e *RuleEngine) evaluateRule(ctx context.Context, rule CompiledRule, stateKey string, correlationKey string, event *eventDomain.Event, eventType string) (State, bool) {
+func (e *RuleEngine) evaluateRule(ctx context.Context, rule CompiledRule, stateKey string, correlationKey string, event *eventDomain.Event, eventType string) (State, bool, string, map[string]any) {
 	switch rule.Type {
 	case "threshold":
 		return e.evaluateThreshold(ctx, rule, stateKey, correlationKey, event)
@@ -212,15 +253,18 @@ func (e *RuleEngine) evaluateRule(ctx context.Context, rule CompiledRule, stateK
 	case "anomaly":
 		return e.evaluateAnomaly(ctx, rule, stateKey, correlationKey, event)
 	default:
-		return State{}, false
+		return State{}, false, "unsupported_rule_type", map[string]any{"rule_type": rule.Type}
 	}
 }
 
-func (e *RuleEngine) evaluateThreshold(ctx context.Context, rule CompiledRule, stateKey string, correlationKey string, event *eventDomain.Event) (State, bool) {
+func (e *RuleEngine) evaluateThreshold(ctx context.Context, rule CompiledRule, stateKey string, correlationKey string, event *eventDomain.Event) (State, bool, string, map[string]any) {
 	// Threshold mode keeps existing behavior for backward compatibility.
 	state, canEvaluate := e.stateStore.Update(rule, stateKey, event.EventTime, event.ID)
 	if !canEvaluate {
-		return State{}, false
+		return State{}, false, "state_limit_reached", map[string]any{
+			"threshold":  rule.Threshold,
+			"window_sec": int(rule.Window.Seconds()),
+		}
 	}
 
 	if err := e.persistThresholdState(ctx, rule, correlationKey, state); err != nil {
@@ -228,11 +272,19 @@ func (e *RuleEngine) evaluateThreshold(ctx context.Context, rule CompiledRule, s
 	}
 
 	if state.Count < rule.Threshold {
-		return State{}, false
+		return State{}, false, "threshold_not_reached", map[string]any{
+			"count":      state.Count,
+			"threshold":  rule.Threshold,
+			"window_sec": int(rule.Window.Seconds()),
+		}
 	}
 
 	if !state.LastAlertTime.IsZero() && state.LastSeen.Sub(state.LastAlertTime) < rule.Window {
-		return State{}, false
+		return State{}, false, "suppressed_within_window", map[string]any{
+			"count":      state.Count,
+			"threshold":  rule.Threshold,
+			"window_sec": int(rule.Window.Seconds()),
+		}
 	}
 
 	e.stateStore.MarkAlert(stateKey, state.LastSeen)
@@ -240,10 +292,14 @@ func (e *RuleEngine) evaluateThreshold(ctx context.Context, rule CompiledRule, s
 	if err := e.persistThresholdState(ctx, rule, correlationKey, state); err != nil {
 		e.log.WithError(err).WithFields(logrus.Fields{"rule_id": rule.ID, "correlation_key": correlationKey}).Warn("failed to persist threshold alert marker")
 	}
-	return state, true
+	return state, true, "threshold_triggered", map[string]any{
+		"count":      state.Count,
+		"threshold":  rule.Threshold,
+		"window_sec": int(rule.Window.Seconds()),
+	}
 }
 
-func (e *RuleEngine) evaluateSequence(ctx context.Context, rule CompiledRule, stateKey string, correlationKey string, event *eventDomain.Event, eventType string) (State, bool) {
+func (e *RuleEngine) evaluateSequence(ctx context.Context, rule CompiledRule, stateKey string, correlationKey string, event *eventDomain.Event, eventType string) (State, bool, string, map[string]any) {
 	// Sequence mode tracks ordered event types inside one correlation key and time window.
 	now := event.EventTime
 	if now.IsZero() {
@@ -268,14 +324,21 @@ func (e *RuleEngine) evaluateSequence(ctx context.Context, rule CompiledRule, st
 	firstStep := rule.SequenceSteps[0]
 	if state.StepIndex == 0 {
 		if eventType != firstStep {
-			return State{}, false
+			return State{}, false, "sequence_first_step_not_matched", map[string]any{
+				"event_type": eventType,
+				"expected":   firstStep,
+			}
 		}
 		state.StepIndex = 1
 		state.FirstSeen = now
 		state.LastSeen = now
 		state.LastEventID = event.ID
 		e.persistSequenceState(ctx, rule, correlationKey, state, now)
-		return State{}, false
+		return State{}, false, "sequence_started", map[string]any{
+			"event_type":  eventType,
+			"step_index":  state.StepIndex,
+			"total_steps": len(rule.SequenceSteps),
+		}
 	}
 
 	expected := rule.SequenceSteps[state.StepIndex]
@@ -285,13 +348,19 @@ func (e *RuleEngine) evaluateSequence(ctx context.Context, rule CompiledRule, st
 		state.LastEventID = event.ID
 		if state.StepIndex < len(rule.SequenceSteps) {
 			e.persistSequenceState(ctx, rule, correlationKey, state, now)
-			return State{}, false
+			return State{}, false, "sequence_progressed", map[string]any{
+				"event_type":  eventType,
+				"step_index":  state.StepIndex,
+				"total_steps": len(rule.SequenceSteps),
+			}
 		}
 
 		if !state.LastAlertTime.IsZero() && now.Sub(state.LastAlertTime) < rule.Window {
 			state.StepIndex = 0
 			state.FirstSeen = time.Time{}
-			return State{}, false
+			return State{}, false, "suppressed_within_window", map[string]any{
+				"window_sec": int(rule.Window.Seconds()),
+			}
 		}
 
 		state.LastAlertTime = now
@@ -307,7 +376,10 @@ func (e *RuleEngine) evaluateSequence(ctx context.Context, rule CompiledRule, st
 		state.StepIndex = 0
 		state.FirstSeen = time.Time{}
 		e.persistSequenceState(ctx, rule, correlationKey, state, now)
-		return triggered, true
+		return triggered, true, "sequence_triggered", map[string]any{
+			"event_type": eventType,
+			"steps":      rule.SequenceSteps,
+		}
 	}
 
 	if eventType == firstStep {
@@ -316,12 +388,20 @@ func (e *RuleEngine) evaluateSequence(ctx context.Context, rule CompiledRule, st
 		state.LastSeen = now
 		state.LastEventID = event.ID
 		e.persistSequenceState(ctx, rule, correlationKey, state, now)
+		return State{}, false, "sequence_restarted", map[string]any{
+			"event_type":  eventType,
+			"step_index":  state.StepIndex,
+			"total_steps": len(rule.SequenceSteps),
+		}
 	}
 
-	return State{}, false
+	return State{}, false, "sequence_out_of_order", map[string]any{
+		"event_type": eventType,
+		"expected":   expected,
+	}
 }
 
-func (e *RuleEngine) evaluateCorrelation(ctx context.Context, rule CompiledRule, stateKey string, correlationKey string, event *eventDomain.Event, eventType string) (State, bool) {
+func (e *RuleEngine) evaluateCorrelation(ctx context.Context, rule CompiledRule, stateKey string, correlationKey string, event *eventDomain.Event, eventType string) (State, bool, string, map[string]any) {
 	// Correlation mode triggers when volume and distinct event diversity are both satisfied.
 	now := event.EventTime
 	if now.IsZero() {
@@ -354,28 +434,45 @@ func (e *RuleEngine) evaluateCorrelation(ctx context.Context, rule CompiledRule,
 	e.persistCorrelationState(ctx, rule, correlationKey, state, now)
 
 	if state.Count < rule.Threshold {
-		return State{}, false
+		return State{}, false, "correlation_volume_not_reached", map[string]any{
+			"count":        state.Count,
+			"threshold":    rule.Threshold,
+			"distinct":     len(state.DistinctTypes),
+			"min_distinct": rule.MinDistinctEventTypes,
+		}
 	}
 	if len(state.DistinctTypes) < rule.MinDistinctEventTypes {
-		return State{}, false
+		return State{}, false, "correlation_distinct_not_reached", map[string]any{
+			"count":        state.Count,
+			"threshold":    rule.Threshold,
+			"distinct":     len(state.DistinctTypes),
+			"min_distinct": rule.MinDistinctEventTypes,
+		}
 	}
 	if !state.LastAlertTime.IsZero() && now.Sub(state.LastAlertTime) < rule.Window {
-		return State{}, false
+		return State{}, false, "suppressed_within_window", map[string]any{
+			"window_sec": int(rule.Window.Seconds()),
+		}
 	}
 
 	state.LastAlertTime = now
 	e.persistCorrelationState(ctx, rule, correlationKey, state, now)
 	return State{
-		Count:         state.Count,
-		FirstSeen:     state.FirstSeen,
-		LastSeen:      state.LastSeen,
-		LastAlertTime: state.LastAlertTime,
-		RuleID:        rule.ID,
-		LastEventID:   state.LastEventID,
-	}, true
+			Count:         state.Count,
+			FirstSeen:     state.FirstSeen,
+			LastSeen:      state.LastSeen,
+			LastAlertTime: state.LastAlertTime,
+			RuleID:        rule.ID,
+			LastEventID:   state.LastEventID,
+		}, true, "correlation_triggered", map[string]any{
+			"count":        state.Count,
+			"threshold":    rule.Threshold,
+			"distinct":     len(state.DistinctTypes),
+			"min_distinct": rule.MinDistinctEventTypes,
+		}
 }
 
-func (e *RuleEngine) evaluateAnomaly(ctx context.Context, rule CompiledRule, stateKey string, correlationKey string, event *eventDomain.Event) (State, bool) {
+func (e *RuleEngine) evaluateAnomaly(ctx context.Context, rule CompiledRule, stateKey string, correlationKey string, event *eventDomain.Event) (State, bool, string, map[string]any) {
 	// Anomaly mode compares current bucket count against baseline average * spike factor.
 	now := event.EventTime
 	if now.IsZero() {
@@ -417,7 +514,9 @@ func (e *RuleEngine) evaluateAnomaly(ctx context.Context, rule CompiledRule, sta
 	e.persistAnomalyState(ctx, rule, correlationKey, state, now)
 
 	if len(state.History) == 0 {
-		return State{}, false
+		return State{}, false, "anomaly_baseline_unavailable", map[string]any{
+			"current_count": state.CurrentCount,
+		}
 	}
 
 	total := 0
@@ -428,22 +527,36 @@ func (e *RuleEngine) evaluateAnomaly(ctx context.Context, rule CompiledRule, sta
 	triggerThreshold := math.Max(float64(rule.AnomalyMinCount), baselineAvg*rule.SpikeFactor)
 
 	if float64(state.CurrentCount) < triggerThreshold {
-		return State{}, false
+		return State{}, false, "anomaly_spike_not_reached", map[string]any{
+			"current_count":     state.CurrentCount,
+			"trigger_threshold": triggerThreshold,
+			"baseline_avg":      baselineAvg,
+			"spike_factor":      rule.SpikeFactor,
+			"anomaly_min_count": rule.AnomalyMinCount,
+		}
 	}
 	if !state.LastAlertTime.IsZero() && now.Sub(state.LastAlertTime) < rule.Window {
-		return State{}, false
+		return State{}, false, "suppressed_within_window", map[string]any{
+			"window_sec": int(rule.Window.Seconds()),
+		}
 	}
 
 	state.LastAlertTime = now
 	e.persistAnomalyState(ctx, rule, correlationKey, state, now)
 	return State{
-		Count:         state.CurrentCount,
-		FirstSeen:     state.CurrentBucketStart,
-		LastSeen:      state.LastSeen,
-		LastAlertTime: state.LastAlertTime,
-		RuleID:        rule.ID,
-		LastEventID:   state.LastEventID,
-	}, true
+			Count:         state.CurrentCount,
+			FirstSeen:     state.CurrentBucketStart,
+			LastSeen:      state.LastSeen,
+			LastAlertTime: state.LastAlertTime,
+			RuleID:        rule.ID,
+			LastEventID:   state.LastEventID,
+		}, true, "anomaly_triggered", map[string]any{
+			"current_count":     state.CurrentCount,
+			"trigger_threshold": triggerThreshold,
+			"baseline_avg":      baselineAvg,
+			"spike_factor":      rule.SpikeFactor,
+			"anomaly_min_count": rule.AnomalyMinCount,
+		}
 }
 
 func (e *RuleEngine) ReloadRules(ctx context.Context) error {

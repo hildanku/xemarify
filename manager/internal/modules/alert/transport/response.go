@@ -35,8 +35,17 @@ type AlertEventResponse struct {
 }
 
 type AlertDetailResponse struct {
-	Alert  *AlertResponse        `json:"alert"`
-	Events []*AlertEventResponse `json:"events"`
+	Alert       *AlertResponse        `json:"alert"`
+	Events      []*AlertEventResponse `json:"events"`
+	Explanation *AlertExplanation     `json:"explanation,omitempty"`
+}
+
+type AlertExplanation struct {
+	Matched        bool                   `json:"matched"`
+	Reason         string                 `json:"reason"`
+	CorrelationKey string                 `json:"correlation_key,omitempty"`
+	EvaluatedAt    time.Time              `json:"evaluated_at"`
+	Details        map[string]interface{} `json:"details,omitempty"`
 }
 
 type ListAlertsMetadata struct {
@@ -79,5 +88,19 @@ func ToAlertEventResponse(e *domain.AlertEvent) *AlertEventResponse {
 		Message:    e.Message,
 		Normalized: e.Normalized,
 		Raw:        e.Raw,
+	}
+}
+
+func ToAlertExplanationResponse(explanation *domain.AlertExplanation) *AlertExplanation {
+	if explanation == nil {
+		return nil
+	}
+
+	return &AlertExplanation{
+		Matched:        explanation.Matched,
+		Reason:         explanation.Reason,
+		CorrelationKey: explanation.CorrelationKey,
+		EvaluatedAt:    explanation.EvaluatedAt,
+		Details:        explanation.Details,
 	}
 }
