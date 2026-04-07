@@ -2,11 +2,14 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"math"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	eventDomain "github.com/hildanku/xemarify/internal/modules/event/domain"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/sirupsen/logrus"
@@ -33,11 +36,45 @@ type RuleEngine struct {
 	alertWriter  AlertWriter
 	metrics      *EngineMetrics
 	log          *logrus.Logger
+	persistence  *persistentRuntimeStore
+	degradedMode atomic.Bool
 
 	advancedMu        sync.Mutex
 	sequenceStates    map[string]*sequenceRuntimeState
 	correlationStates map[string]*correlationRuntimeState
 	anomalyStates     map[string]*anomalyRuntimeState
+}
+
+type thresholdPersistedData struct {
+	Count         int       `json:"count"`
+	LastAlertTime time.Time `json:"last_alert_time"`
+	LastEventID   string    `json:"last_event_id"`
+}
+
+type sequencePersistedData struct {
+	StepIndex     int       `json:"step_index"`
+	LastAlertTime time.Time `json:"last_alert_time"`
+	LastEventID   string    `json:"last_event_id"`
+}
+
+type correlationPersistedData struct {
+	Count         int       `json:"count"`
+	DistinctTypes []string  `json:"distinct_types"`
+	LastAlertTime time.Time `json:"last_alert_time"`
+	LastEventID   string    `json:"last_event_id"`
+}
+
+type anomalyHistoryPersistedData struct {
+	BucketStart time.Time `json:"bucket_start"`
+	Count       int       `json:"count"`
+}
+
+type anomalyPersistedData struct {
+	CurrentBucketStart time.Time                     `json:"current_bucket_start"`
+	CurrentCount       int                           `json:"current_count"`
+	History            []anomalyHistoryPersistedData `json:"history"`
+	LastAlertTime      time.Time                     `json:"last_alert_time"`
+	LastEventID        string                        `json:"last_event_id"`
 }
 
 func NewRuleEngine(ctx context.Context, db *pgxpool.Pool, log *logrus.Logger) (*RuleEngine, error) {
@@ -55,15 +92,29 @@ func NewRuleEngine(ctx context.Context, db *pgxpool.Pool, log *logrus.Logger) (*
 		anomalyStates:     make(map[string]*anomalyRuntimeState),
 	}
 	engine.stateStore = NewStateStore(30*time.Second, 100000, log, metrics)
+	engine.persistence = newPersistentRuntimeStore(db)
 
 	if err := engine.ReloadRules(ctx); err != nil {
 		return nil, err
+	}
+
+	if err := engine.restoreRuntimeState(ctx); err != nil {
+		engine.degradedMode.Store(true)
+		engine.metrics.DegradedMode.Set(1)
+		engine.metrics.StateRestoreFailed.Inc()
+		engine.log.WithError(err).Error("failed to restore runtime state; entering degraded mode")
+	} else {
+		engine.metrics.DegradedMode.Set(0)
 	}
 
 	return engine, nil
 }
 
 func (e *RuleEngine) ProcessEvent(ctx context.Context, event *eventDomain.Event) error {
+	if e.degradedMode.Load() {
+		return nil
+	}
+
 	if event == nil {
 		return nil
 	}
@@ -95,9 +146,30 @@ func (e *RuleEngine) ProcessEvent(ctx context.Context, event *eventDomain.Event)
 		if !ok {
 			continue
 		}
+		stateKey := buildRuntimeStateKey(rule.ID.String(), correlationKey)
 
-		triggeredState, triggered := e.evaluateRule(rule, correlationKey, event, eventType)
+		triggeredState, triggered := e.evaluateRule(ctx, rule, stateKey, correlationKey, event, eventType)
 		if !triggered {
+			continue
+		}
+
+		dedupKey := buildAlertDedupKey(rule.ID.String(), correlationKey, triggeredState.LastSeen, rule.Window)
+		dedupUntil := triggeredState.LastSeen
+		if dedupUntil.IsZero() {
+			dedupUntil = time.Now().UTC()
+		}
+		dedupUntil = dedupUntil.Add(rule.Window)
+		acquired, dedupErr := e.persistence.tryAcquireAlertDedup(ctx, dedupKey, dedupUntil)
+		if dedupErr != nil {
+			e.log.WithError(dedupErr).WithFields(logrus.Fields{
+				"rule_id":         rule.ID,
+				"event_id":        event.ID,
+				"correlation_key": correlationKey,
+			}).Warn("failed to persist dedup key; suppressing alert for safety")
+			continue
+		}
+		if !acquired {
+			e.metrics.DuplicateAlerts.Inc()
 			continue
 		}
 
@@ -121,31 +193,40 @@ func (e *RuleEngine) ProcessEvent(ctx context.Context, event *eventDomain.Event)
 		e.metrics.AlertsTotal.Inc()
 	}
 
+	if err := e.persistence.saveCheckpoint(ctx, runtimeCheckpoint{LastEventID: event.ID, LastEventTime: event.EventTime}); err != nil {
+		e.log.WithError(err).WithField("event_id", event.ID).Warn("failed to save engine checkpoint")
+	}
+
 	return nil
 }
 
 // evaluateRule executes one rule by type and returns synthesized state for alert payload.
-func (e *RuleEngine) evaluateRule(rule CompiledRule, correlationKey string, event *eventDomain.Event, eventType string) (State, bool) {
+func (e *RuleEngine) evaluateRule(ctx context.Context, rule CompiledRule, stateKey string, correlationKey string, event *eventDomain.Event, eventType string) (State, bool) {
 	switch rule.Type {
 	case "threshold":
-		return e.evaluateThreshold(rule, correlationKey, event)
+		return e.evaluateThreshold(ctx, rule, stateKey, correlationKey, event)
 	case "sequence":
-		return e.evaluateSequence(rule, correlationKey, event, eventType)
+		return e.evaluateSequence(ctx, rule, stateKey, correlationKey, event, eventType)
 	case "correlation":
-		return e.evaluateCorrelation(rule, correlationKey, event, eventType)
+		return e.evaluateCorrelation(ctx, rule, stateKey, correlationKey, event, eventType)
 	case "anomaly":
-		return e.evaluateAnomaly(rule, correlationKey, event)
+		return e.evaluateAnomaly(ctx, rule, stateKey, correlationKey, event)
 	default:
 		return State{}, false
 	}
 }
 
-func (e *RuleEngine) evaluateThreshold(rule CompiledRule, correlationKey string, event *eventDomain.Event) (State, bool) {
+func (e *RuleEngine) evaluateThreshold(ctx context.Context, rule CompiledRule, stateKey string, correlationKey string, event *eventDomain.Event) (State, bool) {
 	// Threshold mode keeps existing behavior for backward compatibility.
-	state, canEvaluate := e.stateStore.Update(rule, correlationKey, event.EventTime, event.ID)
+	state, canEvaluate := e.stateStore.Update(rule, stateKey, event.EventTime, event.ID)
 	if !canEvaluate {
 		return State{}, false
 	}
+
+	if err := e.persistThresholdState(ctx, rule, correlationKey, state); err != nil {
+		e.log.WithError(err).WithFields(logrus.Fields{"rule_id": rule.ID, "correlation_key": correlationKey}).Warn("failed to persist threshold runtime state")
+	}
+
 	if state.Count < rule.Threshold {
 		return State{}, false
 	}
@@ -154,11 +235,15 @@ func (e *RuleEngine) evaluateThreshold(rule CompiledRule, correlationKey string,
 		return State{}, false
 	}
 
-	e.stateStore.MarkAlert(correlationKey, state.LastSeen)
+	e.stateStore.MarkAlert(stateKey, state.LastSeen)
+	state.LastAlertTime = state.LastSeen
+	if err := e.persistThresholdState(ctx, rule, correlationKey, state); err != nil {
+		e.log.WithError(err).WithFields(logrus.Fields{"rule_id": rule.ID, "correlation_key": correlationKey}).Warn("failed to persist threshold alert marker")
+	}
 	return state, true
 }
 
-func (e *RuleEngine) evaluateSequence(rule CompiledRule, correlationKey string, event *eventDomain.Event, eventType string) (State, bool) {
+func (e *RuleEngine) evaluateSequence(ctx context.Context, rule CompiledRule, stateKey string, correlationKey string, event *eventDomain.Event, eventType string) (State, bool) {
 	// Sequence mode tracks ordered event types inside one correlation key and time window.
 	now := event.EventTime
 	if now.IsZero() {
@@ -168,15 +253,16 @@ func (e *RuleEngine) evaluateSequence(rule CompiledRule, correlationKey string, 
 	e.advancedMu.Lock()
 	defer e.advancedMu.Unlock()
 
-	state, ok := e.sequenceStates[correlationKey]
+	state, ok := e.sequenceStates[stateKey]
 	if !ok {
 		state = &sequenceRuntimeState{}
-		e.sequenceStates[correlationKey] = state
+		e.sequenceStates[stateKey] = state
 	}
 
 	if !state.FirstSeen.IsZero() && now.Sub(state.FirstSeen) > rule.Window {
 		state.StepIndex = 0
 		state.FirstSeen = time.Time{}
+		state.LastSeen = now
 	}
 
 	firstStep := rule.SequenceSteps[0]
@@ -188,6 +274,7 @@ func (e *RuleEngine) evaluateSequence(rule CompiledRule, correlationKey string, 
 		state.FirstSeen = now
 		state.LastSeen = now
 		state.LastEventID = event.ID
+		e.persistSequenceState(ctx, rule, correlationKey, state, now)
 		return State{}, false
 	}
 
@@ -197,6 +284,7 @@ func (e *RuleEngine) evaluateSequence(rule CompiledRule, correlationKey string, 
 		state.LastSeen = now
 		state.LastEventID = event.ID
 		if state.StepIndex < len(rule.SequenceSteps) {
+			e.persistSequenceState(ctx, rule, correlationKey, state, now)
 			return State{}, false
 		}
 
@@ -207,6 +295,7 @@ func (e *RuleEngine) evaluateSequence(rule CompiledRule, correlationKey string, 
 		}
 
 		state.LastAlertTime = now
+		e.persistSequenceState(ctx, rule, correlationKey, state, now)
 		triggered := State{
 			Count:         len(rule.SequenceSteps),
 			FirstSeen:     state.FirstSeen,
@@ -217,6 +306,7 @@ func (e *RuleEngine) evaluateSequence(rule CompiledRule, correlationKey string, 
 		}
 		state.StepIndex = 0
 		state.FirstSeen = time.Time{}
+		e.persistSequenceState(ctx, rule, correlationKey, state, now)
 		return triggered, true
 	}
 
@@ -225,12 +315,13 @@ func (e *RuleEngine) evaluateSequence(rule CompiledRule, correlationKey string, 
 		state.FirstSeen = now
 		state.LastSeen = now
 		state.LastEventID = event.ID
+		e.persistSequenceState(ctx, rule, correlationKey, state, now)
 	}
 
 	return State{}, false
 }
 
-func (e *RuleEngine) evaluateCorrelation(rule CompiledRule, correlationKey string, event *eventDomain.Event, eventType string) (State, bool) {
+func (e *RuleEngine) evaluateCorrelation(ctx context.Context, rule CompiledRule, stateKey string, correlationKey string, event *eventDomain.Event, eventType string) (State, bool) {
 	// Correlation mode triggers when volume and distinct event diversity are both satisfied.
 	now := event.EventTime
 	if now.IsZero() {
@@ -240,10 +331,10 @@ func (e *RuleEngine) evaluateCorrelation(rule CompiledRule, correlationKey strin
 	e.advancedMu.Lock()
 	defer e.advancedMu.Unlock()
 
-	state, ok := e.correlationStates[correlationKey]
+	state, ok := e.correlationStates[stateKey]
 	if !ok {
 		state = &correlationRuntimeState{DistinctTypes: make(map[string]struct{})}
-		e.correlationStates[correlationKey] = state
+		e.correlationStates[stateKey] = state
 	}
 
 	if !state.FirstSeen.IsZero() && now.Sub(state.FirstSeen) > rule.Window {
@@ -260,6 +351,7 @@ func (e *RuleEngine) evaluateCorrelation(rule CompiledRule, correlationKey strin
 	state.LastSeen = now
 	state.LastEventID = event.ID
 	state.DistinctTypes[eventType] = struct{}{}
+	e.persistCorrelationState(ctx, rule, correlationKey, state, now)
 
 	if state.Count < rule.Threshold {
 		return State{}, false
@@ -272,6 +364,7 @@ func (e *RuleEngine) evaluateCorrelation(rule CompiledRule, correlationKey strin
 	}
 
 	state.LastAlertTime = now
+	e.persistCorrelationState(ctx, rule, correlationKey, state, now)
 	return State{
 		Count:         state.Count,
 		FirstSeen:     state.FirstSeen,
@@ -282,7 +375,7 @@ func (e *RuleEngine) evaluateCorrelation(rule CompiledRule, correlationKey strin
 	}, true
 }
 
-func (e *RuleEngine) evaluateAnomaly(rule CompiledRule, correlationKey string, event *eventDomain.Event) (State, bool) {
+func (e *RuleEngine) evaluateAnomaly(ctx context.Context, rule CompiledRule, stateKey string, correlationKey string, event *eventDomain.Event) (State, bool) {
 	// Anomaly mode compares current bucket count against baseline average * spike factor.
 	now := event.EventTime
 	if now.IsZero() {
@@ -293,10 +386,10 @@ func (e *RuleEngine) evaluateAnomaly(rule CompiledRule, correlationKey string, e
 	e.advancedMu.Lock()
 	defer e.advancedMu.Unlock()
 
-	state, ok := e.anomalyStates[correlationKey]
+	state, ok := e.anomalyStates[stateKey]
 	if !ok {
 		state = &anomalyRuntimeState{}
-		e.anomalyStates[correlationKey] = state
+		e.anomalyStates[stateKey] = state
 	}
 
 	if state.CurrentBucketStart.IsZero() {
@@ -321,6 +414,7 @@ func (e *RuleEngine) evaluateAnomaly(rule CompiledRule, correlationKey string, e
 	state.CurrentCount++
 	state.LastSeen = now
 	state.LastEventID = event.ID
+	e.persistAnomalyState(ctx, rule, correlationKey, state, now)
 
 	if len(state.History) == 0 {
 		return State{}, false
@@ -341,6 +435,7 @@ func (e *RuleEngine) evaluateAnomaly(rule CompiledRule, correlationKey string, e
 	}
 
 	state.LastAlertTime = now
+	e.persistAnomalyState(ctx, rule, correlationKey, state, now)
 	return State{
 		Count:         state.CurrentCount,
 		FirstSeen:     state.CurrentBucketStart,
@@ -375,4 +470,298 @@ func (e *RuleEngine) ReloadRules(ctx context.Context) error {
 
 func (e *RuleEngine) Stop() {
 	e.stateStore.Stop()
+}
+
+func buildRuntimeStateKey(ruleID string, correlationKey string) string {
+	return ruleID + ":" + correlationKey
+}
+
+func buildAlertDedupKey(ruleID string, correlationKey string, triggeredAt time.Time, window time.Duration) string {
+	if triggeredAt.IsZero() {
+		triggeredAt = time.Now().UTC()
+	}
+	bucket := triggeredAt.Unix()
+	if window > 0 {
+		bucket = triggeredAt.Truncate(window).Unix()
+	}
+	return fmt.Sprintf("%s|%s|%d", ruleID, correlationKey, bucket)
+}
+
+func (e *RuleEngine) restoreRuntimeState(ctx context.Context) error {
+	e.metrics.StateRestoreTotal.Inc()
+	start := time.Now()
+
+	if err := e.persistence.pruneExpiredStates(ctx); err != nil {
+		return err
+	}
+
+	rows, err := e.persistence.loadActiveStates(ctx)
+	if err != nil {
+		return err
+	}
+
+	runtimeRules := e.runtimeRules.Load()
+	if runtimeRules == nil {
+		return nil
+	}
+
+	ruleByID := make(map[string]CompiledRule)
+	for _, compiledRules := range runtimeRules.(*RuntimeRules).rulesByEventType {
+		for _, rule := range compiledRules {
+			ruleByID[rule.ID.String()] = rule
+		}
+	}
+
+	now := time.Now().UTC()
+	maxStaleness := 0.0
+
+	for _, row := range rows {
+		rule, ok := ruleByID[row.RuleID.String()]
+		if !ok {
+			continue
+		}
+
+		staleness := now.Sub(row.LastSeenAt).Seconds()
+		if staleness > maxStaleness {
+			maxStaleness = staleness
+		}
+
+		switch row.StateType {
+		case "threshold":
+			if err := e.restoreThresholdState(rule, row); err != nil {
+				e.log.WithError(err).WithFields(logrus.Fields{"rule_id": row.RuleID, "correlation_key": row.CorrelationKey}).Warn("skipping invalid threshold state row")
+			}
+		case "sequence":
+			if err := e.restoreSequenceState(rule, row); err != nil {
+				e.log.WithError(err).WithFields(logrus.Fields{"rule_id": row.RuleID, "correlation_key": row.CorrelationKey}).Warn("skipping invalid sequence state row")
+			}
+		case "correlation":
+			if err := e.restoreCorrelationState(rule, row); err != nil {
+				e.log.WithError(err).WithFields(logrus.Fields{"rule_id": row.RuleID, "correlation_key": row.CorrelationKey}).Warn("skipping invalid correlation state row")
+			}
+		case "anomaly":
+			if err := e.restoreAnomalyState(rule, row); err != nil {
+				e.log.WithError(err).WithFields(logrus.Fields{"rule_id": row.RuleID, "correlation_key": row.CorrelationKey}).Warn("skipping invalid anomaly state row")
+			}
+		default:
+			e.log.WithFields(logrus.Fields{"rule_id": row.RuleID, "correlation_key": row.CorrelationKey, "state_type": row.StateType}).Warn("unknown persisted state type")
+		}
+	}
+
+	e.metrics.StateStaleness.Set(maxStaleness)
+	e.metrics.StateRestoreLatency.Observe(time.Since(start).Seconds())
+
+	if checkpoint, found, checkpointErr := e.persistence.loadCheckpoint(ctx); checkpointErr != nil {
+		e.log.WithError(checkpointErr).Warn("failed to load engine checkpoint")
+	} else if found {
+		e.log.WithFields(logrus.Fields{
+			"last_event_id":   checkpoint.LastEventID,
+			"last_event_time": checkpoint.LastEventTime,
+		}).Info("engine checkpoint restored")
+	}
+
+	return nil
+}
+
+func (e *RuleEngine) restoreThresholdState(rule CompiledRule, row persistedRuntimeStateRow) error {
+	var payload thresholdPersistedData
+	if err := json.Unmarshal(row.StateData, &payload); err != nil {
+		return err
+	}
+
+	lastEventID, _ := uuidFromString(payload.LastEventID)
+	state := State{
+		Count:         payload.Count,
+		FirstSeen:     row.FirstSeenAt,
+		LastSeen:      row.LastSeenAt,
+		ExpiresAt:     row.ExpiresAt,
+		LastAlertTime: payload.LastAlertTime,
+		RuleID:        rule.ID,
+		LastEventID:   lastEventID,
+	}
+
+	stateKey := buildRuntimeStateKey(rule.ID.String(), row.CorrelationKey)
+	e.stateStore.Restore(stateKey, state)
+	return nil
+}
+
+func (e *RuleEngine) restoreSequenceState(rule CompiledRule, row persistedRuntimeStateRow) error {
+	var payload sequencePersistedData
+	if err := json.Unmarshal(row.StateData, &payload); err != nil {
+		return err
+	}
+	lastEventID, _ := uuidFromString(payload.LastEventID)
+
+	e.advancedMu.Lock()
+	e.sequenceStates[buildRuntimeStateKey(rule.ID.String(), row.CorrelationKey)] = &sequenceRuntimeState{
+		StepIndex:     payload.StepIndex,
+		FirstSeen:     row.FirstSeenAt,
+		LastSeen:      row.LastSeenAt,
+		LastAlertTime: payload.LastAlertTime,
+		LastEventID:   lastEventID,
+	}
+	e.advancedMu.Unlock()
+	return nil
+}
+
+func (e *RuleEngine) restoreCorrelationState(rule CompiledRule, row persistedRuntimeStateRow) error {
+	var payload correlationPersistedData
+	if err := json.Unmarshal(row.StateData, &payload); err != nil {
+		return err
+	}
+
+	distinct := make(map[string]struct{}, len(payload.DistinctTypes))
+	for _, eventType := range payload.DistinctTypes {
+		distinct[eventType] = struct{}{}
+	}
+	lastEventID, _ := uuidFromString(payload.LastEventID)
+
+	e.advancedMu.Lock()
+	e.correlationStates[buildRuntimeStateKey(rule.ID.String(), row.CorrelationKey)] = &correlationRuntimeState{
+		Count:         payload.Count,
+		DistinctTypes: distinct,
+		FirstSeen:     row.FirstSeenAt,
+		LastSeen:      row.LastSeenAt,
+		LastAlertTime: payload.LastAlertTime,
+		LastEventID:   lastEventID,
+	}
+	e.advancedMu.Unlock()
+	return nil
+}
+
+func (e *RuleEngine) restoreAnomalyState(rule CompiledRule, row persistedRuntimeStateRow) error {
+	var payload anomalyPersistedData
+	if err := json.Unmarshal(row.StateData, &payload); err != nil {
+		return err
+	}
+
+	history := make([]anomalyBucket, 0, len(payload.History))
+	for _, item := range payload.History {
+		history = append(history, anomalyBucket{BucketStart: item.BucketStart, Count: item.Count})
+	}
+	lastEventID, _ := uuidFromString(payload.LastEventID)
+
+	e.advancedMu.Lock()
+	e.anomalyStates[buildRuntimeStateKey(rule.ID.String(), row.CorrelationKey)] = &anomalyRuntimeState{
+		CurrentBucketStart: payload.CurrentBucketStart,
+		CurrentCount:       payload.CurrentCount,
+		History:            history,
+		LastSeen:           row.LastSeenAt,
+		LastAlertTime:      payload.LastAlertTime,
+		LastEventID:        lastEventID,
+	}
+	e.advancedMu.Unlock()
+	return nil
+}
+
+func (e *RuleEngine) persistThresholdState(ctx context.Context, rule CompiledRule, correlationKey string, state State) error {
+	return e.persistence.upsertState(
+		ctx,
+		rule.ID,
+		correlationKey,
+		"threshold",
+		thresholdPersistedData{
+			Count:         state.Count,
+			LastAlertTime: state.LastAlertTime,
+			LastEventID:   state.LastEventID.String(),
+		},
+		state.FirstSeen,
+		state.LastSeen,
+		state.ExpiresAt,
+	)
+}
+
+func (e *RuleEngine) persistSequenceState(ctx context.Context, rule CompiledRule, correlationKey string, state *sequenceRuntimeState, now time.Time) {
+	firstSeen := state.FirstSeen
+	if firstSeen.IsZero() {
+		firstSeen = now
+	}
+	expiresAt := firstSeen.Add(rule.Window)
+	if state.StepIndex == 0 {
+		expiresAt = now.Add(rule.Window)
+	}
+	if err := e.persistence.upsertState(
+		ctx,
+		rule.ID,
+		correlationKey,
+		"sequence",
+		sequencePersistedData{
+			StepIndex:     state.StepIndex,
+			LastAlertTime: state.LastAlertTime,
+			LastEventID:   state.LastEventID.String(),
+		},
+		firstSeen,
+		state.LastSeen,
+		expiresAt,
+	); err != nil {
+		e.log.WithError(err).WithFields(logrus.Fields{"rule_id": rule.ID, "correlation_key": correlationKey}).Warn("failed to persist sequence runtime state")
+	}
+}
+
+func (e *RuleEngine) persistCorrelationState(ctx context.Context, rule CompiledRule, correlationKey string, state *correlationRuntimeState, now time.Time) {
+	distinct := make([]string, 0, len(state.DistinctTypes))
+	for eventType := range state.DistinctTypes {
+		distinct = append(distinct, eventType)
+	}
+	firstSeen := state.FirstSeen
+	if firstSeen.IsZero() {
+		firstSeen = now
+	}
+	if err := e.persistence.upsertState(
+		ctx,
+		rule.ID,
+		correlationKey,
+		"correlation",
+		correlationPersistedData{
+			Count:         state.Count,
+			DistinctTypes: distinct,
+			LastAlertTime: state.LastAlertTime,
+			LastEventID:   state.LastEventID.String(),
+		},
+		firstSeen,
+		state.LastSeen,
+		firstSeen.Add(rule.Window),
+	); err != nil {
+		e.log.WithError(err).WithFields(logrus.Fields{"rule_id": rule.ID, "correlation_key": correlationKey}).Warn("failed to persist correlation runtime state")
+	}
+}
+
+func (e *RuleEngine) persistAnomalyState(ctx context.Context, rule CompiledRule, correlationKey string, state *anomalyRuntimeState, now time.Time) {
+	history := make([]anomalyHistoryPersistedData, 0, len(state.History))
+	for _, bucket := range state.History {
+		history = append(history, anomalyHistoryPersistedData{BucketStart: bucket.BucketStart, Count: bucket.Count})
+	}
+	firstSeen := state.CurrentBucketStart
+	if firstSeen.IsZero() {
+		firstSeen = now
+	}
+	if err := e.persistence.upsertState(
+		ctx,
+		rule.ID,
+		correlationKey,
+		"anomaly",
+		anomalyPersistedData{
+			CurrentBucketStart: state.CurrentBucketStart,
+			CurrentCount:       state.CurrentCount,
+			History:            history,
+			LastAlertTime:      state.LastAlertTime,
+			LastEventID:        state.LastEventID.String(),
+		},
+		firstSeen,
+		state.LastSeen,
+		now.Add(rule.BaselineWindow),
+	); err != nil {
+		e.log.WithError(err).WithFields(logrus.Fields{"rule_id": rule.ID, "correlation_key": correlationKey}).Warn("failed to persist anomaly runtime state")
+	}
+}
+
+func uuidFromString(value string) (uuid.UUID, bool) {
+	if value == "" {
+		return uuid.Nil, false
+	}
+	parsed, err := uuid.Parse(value)
+	if err != nil {
+		return uuid.Nil, false
+	}
+	return parsed, true
 }

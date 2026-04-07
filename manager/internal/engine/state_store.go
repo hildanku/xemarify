@@ -147,6 +147,36 @@ func (s *StateStore) MarkAlert(key string, alertTime time.Time) {
 	shard.mu.Unlock()
 }
 
+func (s *StateStore) Restore(key string, state State) bool {
+	if state.ExpiresAt.IsZero() || time.Now().UTC().After(state.ExpiresAt) {
+		return false
+	}
+
+	shard := s.shardForKey(key)
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+
+	if existing, found := shard.data[key]; found {
+		*existing = state
+		return true
+	}
+
+	if !s.tryAddRuleState(state.RuleID) {
+		if s.log != nil {
+			s.log.WithFields(logrus.Fields{
+				"rule_id":             state.RuleID,
+				"max_states_per_rule": s.maxStatesPerRule,
+			}).Warn("state limit reached during restore")
+		}
+		return false
+	}
+
+	restored := state
+	shard.data[key] = &restored
+	s.updateStateEntriesMetric()
+	return true
+}
+
 func (s *StateStore) Reset(key string) {
 	shard := s.shardForKey(key)
 	shard.mu.Lock()
