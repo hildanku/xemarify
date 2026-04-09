@@ -285,7 +285,7 @@
 	</div>
 
 	<Dialog.Root bind:open={detailDialogOpen}>
-		<Dialog.Content class="max-w-4xl">
+		<Dialog.Content class="w-[calc(100vw-2rem)] max-w-6xl max-h-[90vh] overflow-hidden">
 			<Dialog.Header>
 				<Dialog.Title>Event Details</Dialog.Title>
 				<Dialog.Description>Inspect complete payload for the selected event.</Dialog.Description>
@@ -306,8 +306,9 @@
 						if (detail.hostname && event.hostname === detail.hostname) return true
 						return false
 					})).slice(0, 8)}
-					<div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-						<div class="rounded-md border p-3 space-y-2">
+					<div class="max-h-[calc(90vh-8rem)] overflow-y-auto pr-1">
+						<div class="grid grid-cols-1 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] gap-4 text-sm">
+							<div class="rounded-md border p-4 space-y-2 min-w-0">
 							<p><span class="text-muted-foreground">Event ID:</span> <span class="font-mono text-xs">{detail.id}</span></p>
 							<p>
 								<span class="text-muted-foreground">Agent ID:</span>
@@ -346,8 +347,8 @@
 									-
 								{/if}
 							</p>
-						</div>
-						<div class="rounded-md border p-3 space-y-2">
+							</div>
+							<div class="rounded-md border p-4 space-y-2 min-w-0">
 							<p><span class="text-muted-foreground">Event Time:</span> {detail.event_time}</p>
 							<p><span class="text-muted-foreground">Received At:</span> {detail.received_at}</p>
 							<p><span class="text-muted-foreground">Input Type:</span> {detail.input_type || '-'}</p>
@@ -362,30 +363,35 @@
 									</a>
 								</p>
 							{/if}
+							</div>
 						</div>
-					</div>
-					<div class="mt-3 rounded-md border p-3">
-						<p class="mb-2 text-sm text-muted-foreground">Related timeline (current result set)</p>
-						{#if relatedTimeline.length === 0}
-							<p class="text-xs text-muted-foreground">No related events in current page result.</p>
-						{:else}
-							<ul class="space-y-2 text-xs">
-								{#each relatedTimeline as item (item.id + (item.event_time || item.received_at || ''))}
-									<li class="rounded border bg-muted/20 px-2 py-1">
-										<p class="text-muted-foreground">{item.event_time || item.received_at}</p>
-										<p class="break-words">{item.message}</p>
-									</li>
-								{/each}
-							</ul>
-						{/if}
-					</div>
-					<div class="mt-3 rounded-md border p-3">
-						<p class="text-sm text-muted-foreground mb-2">Normalized</p>
-						<pre class="text-xs max-h-48 overflow-auto rounded bg-muted/50 p-2 whitespace-pre-wrap break-words">{stringifyNormalized(detail.normalized)}</pre>
-					</div>
-					<div class="mt-3 rounded-md border p-3">
-						<p class="text-sm text-muted-foreground mb-2">Raw</p>
-						<pre class="text-xs max-h-48 overflow-auto rounded bg-muted/50 p-2 whitespace-pre-wrap break-words">{detail.raw || '-'}</pre>
+						<div class="mt-4 grid grid-cols-1 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] gap-4">
+							<div class="rounded-md border p-4 min-w-0">
+								<p class="mb-2 text-sm text-muted-foreground">Related timeline (current result set)</p>
+								{#if relatedTimeline.length === 0}
+									<p class="text-xs text-muted-foreground">No related events in current page result.</p>
+								{:else}
+									<ul class="space-y-2 text-xs">
+										{#each relatedTimeline as item (item.id + (item.event_time || item.received_at || ''))}
+											<li class="rounded border bg-muted/20 px-2 py-1">
+												<p class="text-muted-foreground">{item.event_time || item.received_at}</p>
+												<p class="break-words">{item.message}</p>
+											</li>
+										{/each}
+									</ul>
+								{/if}
+							</div>
+							<div class="space-y-4 min-w-0">
+								<div class="rounded-md border p-4">
+									<p class="text-sm text-muted-foreground mb-2">Normalized</p>
+									<pre class="text-xs max-h-64 overflow-auto rounded bg-muted/50 p-2 whitespace-pre-wrap break-words">{stringifyNormalized(detail.normalized)}</pre>
+								</div>
+								<div class="rounded-md border p-4">
+									<p class="text-sm text-muted-foreground mb-2">Raw</p>
+									<pre class="text-xs max-h-64 overflow-auto rounded bg-muted/50 p-2 whitespace-pre-wrap break-words">{detail.raw || '-'}</pre>
+								</div>
+							</div>
+						</div>
 					</div>
 				{/if}
 			{/if}
