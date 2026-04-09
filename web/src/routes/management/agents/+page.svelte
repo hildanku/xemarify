@@ -29,6 +29,7 @@
 	import SearchIcon from '@lucide/svelte/icons/search'
 	import Trash2Icon from '@lucide/svelte/icons/trash-2'
 	import AgentCreateDialog from '$lib/components/table/agents/agent-create-dialog.svelte'
+	import { realtimeQueryOptions } from '$lib/utils/realtime-query'
 
 	const queryClient = useQueryClient()
 	const params = $derived(parseTableParams($page.url))
@@ -52,6 +53,7 @@
 				`${V1_BASE_URL}/agents?${buildQueryString(params)}`,
 				{ method: 'GET' },
 			),
+		...realtimeQueryOptions(),
 	}))
 
 	const agents = $derived(agentsQuery.data?.data.items ?? [])

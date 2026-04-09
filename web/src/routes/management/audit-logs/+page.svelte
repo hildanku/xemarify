@@ -19,6 +19,7 @@
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js'
 	import SearchIcon from '@lucide/svelte/icons/search'
 	import CalendarIcon from '@lucide/svelte/icons/calendar'
+	import { realtimeQueryOptions } from '$lib/utils/realtime-query'
 
 	type AuditLogPageParams = TableParams & {
 		action: string
@@ -44,6 +45,7 @@
 					`${V1_BASE_URL}/audit-logs?${buildAuditLogQueryString(params)}`,
 					{ method: 'GET' },
 				),
+			...realtimeQueryOptions(),
 		}),
 	)
 

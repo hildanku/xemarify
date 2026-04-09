@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { resolve } from '$app/paths'
 	import { page } from '$app/stores'
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query'
 	import { toast } from 'svelte-sonner'
@@ -24,6 +25,8 @@
 	import CalendarIcon from '@lucide/svelte/icons/calendar'
 	import * as Table from '$lib/components/ui/table/index.js'
 	import CompactDate from '$lib/components/ui/custom/compact-date.svelte'
+	import { realtimeQueryOptions } from '$lib/utils/realtime-query'
+	import { buildInvestigationHref, toEventTimeline } from '$lib/utils/investigation'
 
 	type AlertPageParams = TableParams & {
 		severity: string
@@ -59,6 +62,7 @@
 				`${V1_BASE_URL}/alerts?${buildAlertQueryString(params)}`,
 				{ method: 'GET' },
 			),
+		...realtimeQueryOptions(),
 	}))
 
 	const alerts = $derived(alertsQuery.data?.data.items ?? [])
@@ -69,6 +73,7 @@
 		queryKey: ['alert-detail', selectedAlertID],
 		enabled: !!selectedAlertID,
 		queryFn: () => clientFetch<ApiResponse<AlertDetail>>(`${V1_BASE_URL}/alerts/${selectedAlertID}`, { method: 'GET' }),
+		...realtimeQueryOptions(!!selectedAlertID),
 	}))
 
 	const updateStatusMutation = createMutation(() => ({
@@ -174,6 +179,24 @@
 		triggeredFromDate = ''
 		triggeredToDate = ''
 		updateAlertExtraParams({ triggered_from: '', triggered_to: '' })
+	}
+
+	function buildEventsPivotHref(searchValue: string): string {
+		return buildInvestigationHref(resolve('/management/events'), $page.url.origin, {
+			search: searchValue,
+		})
+	}
+
+	function buildEventsAgentPivotHref(agentID: string): string {
+		return buildInvestigationHref(resolve('/management/events'), $page.url.origin, {
+			agent_id: agentID,
+		})
+	}
+
+	function buildEventsCategoryPivotHref(category: string): string {
+		return buildInvestigationHref(resolve('/management/events'), $page.url.origin, {
+			category,
+		})
 	}
 </script>
 
@@ -286,6 +309,25 @@
 				{:else if (detailQuery.data?.data.events?.length ?? 0) === 0}
 					<div class="p-4 text-sm text-muted-foreground">No related events found for this alert.</div>
 				{:else}
+					{@const timeline = toEventTimeline(detailQuery.data?.data.events ?? [])}
+					<div class="mb-3 rounded-md border p-3">
+						<p class="mb-2 text-sm text-muted-foreground">Investigation timeline</p>
+						<div class="max-h-40 overflow-auto rounded-md border bg-muted/20 p-3">
+							<ul class="space-y-3 border-l pl-4">
+								{#each timeline as item (item.id + (item.event_time || item.received_at || ''))}
+									<li class="relative text-xs">
+										<span class="absolute -left-[1.05rem] top-1 h-2 w-2 rounded-full bg-primary"></span>
+										<p class="text-muted-foreground">
+											{item.event_time || item.received_at}
+											{#if item.severity} · {item.severity}{/if}
+											{#if item.category} · {item.category}{/if}
+										</p>
+										<p class="break-words">{item.message}</p>
+									</li>
+								{/each}
+							</ul>
+						</div>
+					</div>
 					<div class="max-h-[60vh] overflow-auto rounded-md border">
 						<Table.Root>
 							<Table.Header>
@@ -303,10 +345,33 @@
 									<Table.Row>
 										<Table.Cell><CompactDate dateString={event.event_time || event.received_at} /></Table.Cell>
 										<Table.Cell>{event.hostname || '-'}</Table.Cell>
-										<Table.Cell class="font-mono text-xs">{event.source_ip || '-'}</Table.Cell>
-										<Table.Cell>{event.category || '-'}</Table.Cell>
+										<Table.Cell class="font-mono text-xs">
+											{#if event.source_ip}
+												<a class="underline underline-offset-2 hover:text-foreground/80" href={buildEventsPivotHref(event.source_ip)}>
+													{event.source_ip}
+												</a>
+											{:else}
+												-
+											{/if}
+										</Table.Cell>
+										<Table.Cell>
+											{#if event.category}
+												<a class="underline underline-offset-2 hover:text-foreground/80" href={buildEventsCategoryPivotHref(event.category)}>
+													{event.category}
+												</a>
+											{:else}
+												-
+											{/if}
+										</Table.Cell>
 										<Table.Cell>{event.severity || '-'}</Table.Cell>
-										<Table.Cell class="max-w-[480px] truncate" title={event.message}>{event.message}</Table.Cell>
+										<Table.Cell class="max-w-[480px] truncate" title={event.message}>
+											{event.message}
+											{#if event.agent_id}
+												<a class="ml-2 text-xs underline underline-offset-2 hover:text-foreground/80" href={buildEventsAgentPivotHref(event.agent_id)}>
+													agent:{event.agent_id}
+												</a>
+											{/if}
+										</Table.Cell>
 									</Table.Row>
 								{/each}
 							</Table.Body>

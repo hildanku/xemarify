@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { resolve } from '$app/paths'
 	import { page } from '$app/stores'
 	import { createQuery } from '@tanstack/svelte-query'
 	import { clientFetch, type ApiResponse, type ApiResponseWithMetadata } from '$lib/client'
@@ -20,6 +21,8 @@
 	import * as Dialog from '$lib/components/ui/dialog/index.js'
 	import SearchIcon from '@lucide/svelte/icons/search'
 	import CalendarIcon from '@lucide/svelte/icons/calendar'
+	import { realtimeQueryOptions } from '$lib/utils/realtime-query'
+	import { buildInvestigationHref, toEventTimeline } from '$lib/utils/investigation'
 
 	type EventPageParams = TableParams & {
 		severity: string
@@ -54,6 +57,7 @@
 				`${V1_BASE_URL}/events?${buildEventsQueryString(params)}`,
 				{ method: 'GET' },
 			),
+		...realtimeQueryOptions(),
 	}))
 
 	const events = $derived(eventsQuery.data?.data.items ?? [])
@@ -64,6 +68,7 @@
 		queryKey: ['event-detail', selectedEventID],
 		enabled: !!selectedEventID,
 		queryFn: () => clientFetch<ApiResponse<EventDetail>>(`${V1_BASE_URL}/events/${selectedEventID}`, { method: 'GET' }),
+		...realtimeQueryOptions(!!selectedEventID),
 	}))
 
 	function parseEventParams(url: URL, table: TableParams): EventPageParams {
@@ -159,6 +164,25 @@
 			return '-'
 		}
 		return JSON.stringify(normalized, null, 2)
+	}
+
+	function buildAlertsPivotHref(searchValue: string): string {
+		return buildInvestigationHref(resolve('/management/alerts'), $page.url.origin, {
+			search: searchValue,
+		})
+	}
+
+	function buildEventsSearchPivotHref(searchValue: string): string {
+		return buildInvestigationHref(resolve('/management/events'), $page.url.origin, {
+			search: searchValue,
+		})
+	}
+
+	function buildEventsFilterPivotHref(next: Partial<Pick<EventPageParams, 'agent_id' | 'category'>>) {
+		return buildInvestigationHref(resolve('/management/events'), $page.url.origin, {
+			agent_id: next.agent_id,
+			category: next.category,
+		})
 	}
 </script>
 
@@ -276,14 +300,52 @@
 					<div class="p-4 text-sm text-muted-foreground">Event detail not found.</div>
 				{:else}
 					{@const detail = detailQuery.data.data}
+					{@const relatedTimeline = toEventTimeline(events.filter((event) => {
+						if (detail.source_ip && event.source_ip === detail.source_ip) return true
+						if (detail.agent_id && event.agent_id === detail.agent_id) return true
+						if (detail.hostname && event.hostname === detail.hostname) return true
+						return false
+					})).slice(0, 8)}
 					<div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
 						<div class="rounded-md border p-3 space-y-2">
 							<p><span class="text-muted-foreground">Event ID:</span> <span class="font-mono text-xs">{detail.id}</span></p>
-							<p><span class="text-muted-foreground">Agent ID:</span> <span class="font-mono text-xs">{detail.agent_id}</span></p>
-							<p><span class="text-muted-foreground">Hostname:</span> {detail.hostname || '-'}</p>
-							<p><span class="text-muted-foreground">Source IP:</span> {detail.source_ip || '-'}</p>
+							<p>
+								<span class="text-muted-foreground">Agent ID:</span>
+								<a class="ml-1 font-mono text-xs underline underline-offset-2 hover:text-foreground/80" href={buildEventsFilterPivotHref({ agent_id: detail.agent_id })}>
+									{detail.agent_id}
+								</a>
+							</p>
+							<p>
+								<span class="text-muted-foreground">Hostname:</span>
+								{#if detail.hostname}
+									<a class="ml-1 underline underline-offset-2 hover:text-foreground/80" href={buildEventsSearchPivotHref(detail.hostname)}>
+										{detail.hostname}
+									</a>
+								{:else}
+									-
+								{/if}
+							</p>
+							<p>
+								<span class="text-muted-foreground">Source IP:</span>
+								{#if detail.source_ip}
+									<a class="ml-1 font-mono text-xs underline underline-offset-2 hover:text-foreground/80" href={buildEventsSearchPivotHref(detail.source_ip)}>
+										{detail.source_ip}
+									</a>
+								{:else}
+									-
+								{/if}
+							</p>
 							<p><span class="text-muted-foreground">Severity:</span> {detail.severity || '-'}</p>
-							<p><span class="text-muted-foreground">Category:</span> {detail.category || '-'}</p>
+							<p>
+								<span class="text-muted-foreground">Category:</span>
+								{#if detail.category}
+									<a class="ml-1 underline underline-offset-2 hover:text-foreground/80" href={buildEventsFilterPivotHref({ category: detail.category })}>
+										{detail.category}
+									</a>
+								{:else}
+									-
+								{/if}
+							</p>
 						</div>
 						<div class="rounded-md border p-3 space-y-2">
 							<p><span class="text-muted-foreground">Event Time:</span> {detail.event_time}</p>
@@ -292,7 +354,30 @@
 							<p><span class="text-muted-foreground">Facility:</span> {detail.facility || '-'}</p>
 							<p><span class="text-muted-foreground">Message:</span></p>
 							<p class="rounded bg-muted/50 px-2 py-1 break-words">{detail.message}</p>
+							{#if detail.source_ip}
+								<p>
+									<span class="text-muted-foreground">Related alerts:</span>
+									<a class="ml-1 underline underline-offset-2 hover:text-foreground/80" href={buildAlertsPivotHref(detail.source_ip)}>
+										Open alerts by source IP
+									</a>
+								</p>
+							{/if}
 						</div>
+					</div>
+					<div class="mt-3 rounded-md border p-3">
+						<p class="mb-2 text-sm text-muted-foreground">Related timeline (current result set)</p>
+						{#if relatedTimeline.length === 0}
+							<p class="text-xs text-muted-foreground">No related events in current page result.</p>
+						{:else}
+							<ul class="space-y-2 text-xs">
+								{#each relatedTimeline as item (item.id + (item.event_time || item.received_at || ''))}
+									<li class="rounded border bg-muted/20 px-2 py-1">
+										<p class="text-muted-foreground">{item.event_time || item.received_at}</p>
+										<p class="break-words">{item.message}</p>
+									</li>
+								{/each}
+							</ul>
+						{/if}
 					</div>
 					<div class="mt-3 rounded-md border p-3">
 						<p class="text-sm text-muted-foreground mb-2">Normalized</p>
