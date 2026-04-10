@@ -43,7 +43,12 @@ type RuleEngine struct {
 	sequenceStates    map[string]*sequenceRuntimeState
 	correlationStates map[string]*correlationRuntimeState
 	anomalyStates     map[string]*anomalyRuntimeState
+	reloadInterval    time.Duration
+	reloadStopCh      chan struct{}
+	reloadWG          sync.WaitGroup
 }
+
+const defaultRuleReloadInterval = 30 * time.Second
 
 type thresholdPersistedData struct {
 	Count         int       `json:"count"`
@@ -90,6 +95,8 @@ func NewRuleEngine(ctx context.Context, db *pgxpool.Pool, log *logrus.Logger) (*
 		sequenceStates:    make(map[string]*sequenceRuntimeState),
 		correlationStates: make(map[string]*correlationRuntimeState),
 		anomalyStates:     make(map[string]*anomalyRuntimeState),
+		reloadInterval:    defaultRuleReloadInterval,
+		reloadStopCh:      make(chan struct{}),
 	}
 	engine.stateStore = NewStateStore(30*time.Second, 100000, log, metrics)
 	engine.persistence = newPersistentRuntimeStore(db)
@@ -106,6 +113,8 @@ func NewRuleEngine(ctx context.Context, db *pgxpool.Pool, log *logrus.Logger) (*
 	} else {
 		engine.metrics.DegradedMode.Set(0)
 	}
+
+	engine.startRuleReloadLoop(ctx)
 
 	return engine, nil
 }
@@ -582,7 +591,36 @@ func (e *RuleEngine) ReloadRules(ctx context.Context) error {
 }
 
 func (e *RuleEngine) Stop() {
+	if e.reloadStopCh != nil {
+		close(e.reloadStopCh)
+		e.reloadWG.Wait()
+	}
 	e.stateStore.Stop()
+}
+
+func (e *RuleEngine) startRuleReloadLoop(ctx context.Context) {
+	if e.reloadInterval <= 0 {
+		return
+	}
+
+	e.reloadWG.Add(1)
+	go func() {
+		defer e.reloadWG.Done()
+
+		ticker := time.NewTicker(e.reloadInterval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				if err := e.ReloadRules(ctx); err != nil {
+					e.log.WithError(err).Warn("failed periodic rule reload")
+				}
+			case <-e.reloadStopCh:
+				return
+			}
+		}
+	}()
 }
 
 func buildRuntimeStateKey(ruleID string, correlationKey string) string {
