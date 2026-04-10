@@ -1,0 +1,25 @@
+commit format style:
+
+1. follow conventional commit guidelines
+example:
+If it's a new feature (no existing scope):
+feat: what new feature?/add <new feature>
+
+- integrated xxxxxxxxxxxxxxxxxx
+- implemented xxxxxxxxxxxxxxxxxxxx
+- blalbalblablalba
+- ...............
+==========
+If modifying an existing feature:
+
+feat(scope): describe the change
+
+- integrated xxxxxxxxxxxxxxxxxx
+- implemented xxxxxxxxxxxxxxxxxxx
+- xxxxxxxxxxxxxxxxxxxx
+- balbalblalbalba
+- .....................
+
+2. Notes:
+- Keep the title short and descriptive
+- Use dash (-) for detailed explanation
