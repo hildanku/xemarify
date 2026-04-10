@@ -14,7 +14,10 @@
 		
 		for (let i = 0; i < paths.length; i++) {
 			const path = '/' + paths.slice(0, i + 1).join('/');
-			const title = paths[i].charAt(0).toUpperCase() + paths[i].slice(1);
+			const title = paths[i]
+				.split('-')
+				.map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+				.join(' ');
 			breadcrumbs.push({ path, title });
 		}
 		
