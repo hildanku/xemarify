@@ -38,7 +38,7 @@ export const auth = writable<AuthState>({
 let bootstrapPromise: Promise<AuthState> | null = null
 let refreshPromise: Promise<string | null> | null = null
 
-function writeSession(accessToken: string, refreshToken: string) {
+export function writeSession(accessToken: string, refreshToken: string) {
 	setTokens(accessToken, refreshToken)
 	applySessionFromToken(accessToken)
 }
@@ -83,9 +83,13 @@ export function clearSession() {
 	})
 }
 
-async function parseApiResponse<T>(response: Response): Promise<ApiResponse<T>> {
+async function parseApiResponse<T>(
+	response: Response,
+): Promise<ApiResponse<T>> {
 	const text = await response.text()
-	const data = text ? (JSON.parse(text) as ApiResponse<T>) : ({ message: '', data: null } as ApiResponse<T>)
+	const data = text
+		? (JSON.parse(text) as ApiResponse<T>)
+		: ({ message: '', data: null } as ApiResponse<T>)
 
 	if (!response.ok) {
 		throw new Error(data.message || `HTTP error! status: ${response.status}`)
@@ -188,7 +192,12 @@ export async function logout(options?: { remote?: boolean }) {
 	try {
 		if (remote) {
 			const { accessToken, refreshToken } = readTokens()
-			const token = accessToken && !isTokenExpired(accessToken) ? accessToken : refreshToken ? await refreshSession() : null
+			const token =
+				accessToken && !isTokenExpired(accessToken)
+					? accessToken
+					: refreshToken
+						? await refreshSession()
+						: null
 			if (token) {
 				await fetch(`${BASE_URL}/auth/logout`, {
 					method: 'POST',

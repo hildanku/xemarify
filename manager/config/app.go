@@ -13,7 +13,12 @@ type AppConfig struct {
 	Database DatabaseConfig
 	Server   ServerConfig
 	JWT      JWTConfig
+	Setup    SetupConfig
 	LogLevel string
+}
+
+type SetupConfig struct {
+	Token string
 }
 
 type JWTConfig struct {
@@ -73,6 +78,9 @@ func Load() (*AppConfig, error) {
 			Secret:          viper.GetString("JWT_SECRET"),
 			AccessTokenTTL:  parseDurationOrDefault(viper.GetString("JWT_ACCESS_TTL"), 15*time.Minute),
 			RefreshTokenTTL: parseDurationOrDefault(viper.GetString("JWT_REFRESH_TTL"), 7*24*time.Hour),
+		},
+		Setup: SetupConfig{
+			Token: viper.GetString("MANAGER_SETUP_TOKEN"),
 		},
 		LogLevel: logLevel,
 	}

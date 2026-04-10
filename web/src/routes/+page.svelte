@@ -2,8 +2,15 @@
 	import { goto } from '$app/navigation'
 	import { onMount } from 'svelte'
 	import { bootstrapSession } from '$lib/auth/session'
+	import { bootstrapSystemState } from '$lib/setup/system'
 
 	onMount(async () => {
+		const systemState = await bootstrapSystemState()
+		if (!systemState.initialized) {
+			await goto('/setup', { replaceState: true })
+			return
+		}
+
 		const state = await bootstrapSession()
 		await goto(
 			state.status === 'authenticated' ? '/management' : '/auth/login',

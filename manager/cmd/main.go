@@ -35,6 +35,8 @@ import (
 	ruleHandler "github.com/hildanku/xemarify/internal/modules/rule/handler"
 	ruleRepo "github.com/hildanku/xemarify/internal/modules/rule/repository"
 	ruleService "github.com/hildanku/xemarify/internal/modules/rule/service"
+	setupHandler "github.com/hildanku/xemarify/internal/modules/setup/handler"
+	setupService "github.com/hildanku/xemarify/internal/modules/setup/service"
 	userDomain "github.com/hildanku/xemarify/internal/modules/user/domain"
 	userHandler "github.com/hildanku/xemarify/internal/modules/user/handler"
 	userRepo "github.com/hildanku/xemarify/internal/modules/user/repository"
@@ -84,6 +86,7 @@ func main() {
 
 	evtService := eventService.NewEventService(eventRepository, ruleEngine, m, log)
 	authSvc := authService.NewAuthService(userRepository, authRepository, auditLogService, cfg.JWT, log)
+	setupSvc := setupService.NewSetupService(db, cfg.JWT, cfg.Setup.Token, log)
 	userSvc := userService.NewUserService(db, userRepository, auditLogService, log)
 	ruleSvc := ruleService.NewRuleService(ruleRepository, ruleEngine, auditLogService, log)
 	alertSvc := alertService.NewAlertService(alertRepository, auditLogService, log)
@@ -113,9 +116,19 @@ func main() {
 
 	// Public endpoints
 	router.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+		initialized, err := setupSvc.IsInitialized(c.Request.Context())
+		if err != nil {
+			log.WithError(err).Error("failed to determine setup status")
+			c.JSON(http.StatusInternalServerError, gin.H{"status": "error"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"status": "ok", "initialized": initialized})
 	})
 	router.GET("/metrics", gin.WrapH(promhttp.Handler()))
+	setupGroup := router.Group("/setup")
+	setupHandle := setupHandler.NewSetupHandler(setupSvc, log)
+	setupHandle.Register(setupGroup)
 
 	// Auth routes (public)
 	authGroup := router.Group("/auth")
