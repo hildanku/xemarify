@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/hildanku/xemarify/internal/infrastructure/middleware"
 	alertRepo "github.com/hildanku/xemarify/internal/modules/alert/repository"
 	alertService "github.com/hildanku/xemarify/internal/modules/alert/service"
 	"github.com/hildanku/xemarify/internal/modules/alert/transport"
@@ -158,7 +159,9 @@ func (h *AlertHandler) UpdateStatus(c *gin.Context) {
 		return
 	}
 
-	if err := h.svc.UpdateStatus(c.Request.Context(), id, req.Status); err != nil {
+	claims := middleware.UserClaimsFromContext(c)
+
+	if err := h.svc.UpdateStatus(c.Request.Context(), id, req.Status, claims, c.ClientIP()); err != nil {
 		if errors.Is(err, alertService.ErrAlertNotFound) {
 			response.Write(c, http.StatusNotFound, "alert not found", nil)
 			return

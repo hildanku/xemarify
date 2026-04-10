@@ -9,8 +9,11 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/hildanku/xemarify/internal/engine"
+	auditDomain "github.com/hildanku/xemarify/internal/modules/audit/domain"
+	auditService "github.com/hildanku/xemarify/internal/modules/audit/service"
 	"github.com/hildanku/xemarify/internal/modules/rule/domain"
 	ruleRepo "github.com/hildanku/xemarify/internal/modules/rule/repository"
+	jwtpkg "github.com/hildanku/xemarify/pkg/jwt"
 	"github.com/sirupsen/logrus"
 )
 
@@ -34,14 +37,15 @@ var validGroupByFields = map[string]struct{}{
 
 // RuleService orchestrates rule business logic.
 type RuleService struct {
-	repo   ruleRepo.RuleRepository
-	engine engine.Engine
-	log    *logrus.Logger
+	repo     ruleRepo.RuleRepository
+	engine   engine.Engine
+	auditSvc *auditService.AuditLogService
+	log      *logrus.Logger
 }
 
 // NewRuleService constructs the service with its required dependencies.
-func NewRuleService(repo ruleRepo.RuleRepository, detectionEngine engine.Engine, log *logrus.Logger) *RuleService {
-	return &RuleService{repo: repo, engine: detectionEngine, log: log}
+func NewRuleService(repo ruleRepo.RuleRepository, detectionEngine engine.Engine, auditSvc *auditService.AuditLogService, log *logrus.Logger) *RuleService {
+	return &RuleService{repo: repo, engine: detectionEngine, auditSvc: auditSvc, log: log}
 }
 
 type CreateRuleInput struct {
@@ -71,7 +75,7 @@ func (s *RuleService) GetByID(ctx context.Context, id uuid.UUID) (*domain.Rule, 
 	return s.repo.GetByID(ctx, id)
 }
 
-func (s *RuleService) Create(ctx context.Context, input CreateRuleInput) (*domain.Rule, error) {
+func (s *RuleService) Create(ctx context.Context, input CreateRuleInput, actor *jwtpkg.Claims, ip string) (*domain.Rule, error) {
 	if err := validateCondition(input.Condition); err != nil {
 		return nil, err
 	}
@@ -101,10 +105,25 @@ func (s *RuleService) Create(ctx context.Context, input CreateRuleInput) (*domai
 		}
 	}
 
+	s.auditSvc.Log(ctx, &auditDomain.AuditLog{
+		UserID:         &actor.UserID,
+		UserIdentifier: actor.Username,
+		Action:         auditDomain.ActionCreateRule,
+		ObjectType:     strPtr(auditDomain.ObjectTypeRule),
+		ObjectID:       &rule.ID,
+		Metadata: map[string]interface{}{
+			"rule_name":  rule.Name,
+			"level":      rule.Level,
+			"enabled":    rule.Enabled,
+			"tags":       rule.Tags,
+			"ip_address": ip,
+		},
+	})
+
 	return rule, nil
 }
 
-func (s *RuleService) Update(ctx context.Context, id uuid.UUID, input UpdateRuleInput) (*domain.Rule, error) {
+func (s *RuleService) Update(ctx context.Context, id uuid.UUID, input UpdateRuleInput, actor *jwtpkg.Claims, ip string) (*domain.Rule, error) {
 	existing, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
@@ -113,22 +132,39 @@ func (s *RuleService) Update(ctx context.Context, id uuid.UUID, input UpdateRule
 		return nil, nil
 	}
 
+	var changedFields []string
+
 	if input.Name != "" {
+		if strings.TrimSpace(input.Name) != existing.Name {
+			changedFields = append(changedFields, "name")
+		}
 		existing.Name = strings.TrimSpace(input.Name)
 	}
 	if input.Description != "" {
+		if strings.TrimSpace(input.Description) != existing.Description {
+			changedFields = append(changedFields, "description")
+		}
 		existing.Description = strings.TrimSpace(input.Description)
 	}
 	if input.Level != "" {
+		normalizedLevel := strings.ToUpper(strings.TrimSpace(input.Level))
+		if normalizedLevel != existing.Level {
+			changedFields = append(changedFields, "level")
+		}
 		existing.Level = strings.ToUpper(strings.TrimSpace(input.Level))
 	}
 	if input.Enabled != nil {
+		if *input.Enabled != existing.Enabled {
+			changedFields = append(changedFields, "enabled")
+		}
 		existing.Enabled = *input.Enabled
 	}
 	if input.Condition != nil {
+		changedFields = append(changedFields, "condition")
 		existing.Condition = *input.Condition
 	}
 	if input.Tags != nil {
+		changedFields = append(changedFields, "tags")
 		existing.Tags = input.Tags
 	}
 
@@ -146,10 +182,30 @@ func (s *RuleService) Update(ctx context.Context, id uuid.UUID, input UpdateRule
 		}
 	}
 
+	s.auditSvc.Log(ctx, &auditDomain.AuditLog{
+		UserID:         &actor.UserID,
+		UserIdentifier: actor.Username,
+		Action:         auditDomain.ActionUpdateRule,
+		ObjectType:     strPtr(auditDomain.ObjectTypeRule),
+		ObjectID:       &id,
+		Metadata: map[string]interface{}{
+			"changed_fields": changedFields,
+			"ip_address":     ip,
+		},
+	})
+
 	return existing, nil
 }
 
-func (s *RuleService) Delete(ctx context.Context, id uuid.UUID) error {
+func (s *RuleService) Delete(ctx context.Context, id uuid.UUID, actor *jwtpkg.Claims, ip string) error {
+	existing, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if existing == nil {
+		return nil
+	}
+
 	if err := s.repo.Delete(ctx, id); err != nil {
 		return err
 	}
@@ -159,6 +215,18 @@ func (s *RuleService) Delete(ctx context.Context, id uuid.UUID) error {
 			return fmt.Errorf("rule deleted but runtime reload failed: %w", err)
 		}
 	}
+
+	s.auditSvc.Log(ctx, &auditDomain.AuditLog{
+		UserID:         &actor.UserID,
+		UserIdentifier: actor.Username,
+		Action:         auditDomain.ActionDeleteRule,
+		ObjectType:     strPtr(auditDomain.ObjectTypeRule),
+		ObjectID:       &id,
+		Metadata: map[string]interface{}{
+			"deleted_rule_name": existing.Name,
+			"ip_address":        ip,
+		},
+	})
 
 	return nil
 }
@@ -237,3 +305,5 @@ func validateCondition(condition domain.RuleCondition) error {
 
 	return nil
 }
+
+func strPtr(s string) *string { return &s }

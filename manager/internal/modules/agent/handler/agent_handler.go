@@ -133,7 +133,9 @@ func (h *AgentHandler) Heartbeat(c *gin.Context) {
 
 // CreateEnrollmentKey handles POST /api/v1/admin/agent-keys.
 func (h *AgentHandler) CreateEnrollmentKey(c *gin.Context) {
-	key, err := h.svc.GenerateEnrollmentKey(c.Request.Context())
+	claims := middleware.UserClaimsFromContext(c)
+
+	key, err := h.svc.GenerateEnrollmentKey(c.Request.Context(), claims, c.ClientIP())
 	if err != nil {
 		h.log.WithError(err).Error("failed to create enrollment key")
 		response.Write(c, http.StatusInternalServerError, "internal server error", nil)
@@ -213,6 +215,8 @@ func (h *AgentHandler) Create(c *gin.Context) {
 		return
 	}
 
+	claims := middleware.UserClaimsFromContext(c)
+
 	a, err := h.svc.Create(c.Request.Context(), agentService.CreateAgentInput{
 		Name:      req.Name,
 		Hostname:  req.Hostname,
@@ -220,7 +224,7 @@ func (h *AgentHandler) Create(c *gin.Context) {
 		Version:   req.Version,
 		Status:    req.Status,
 		Key:       req.Key,
-	})
+	}, claims, c.ClientIP())
 	if err != nil {
 		if errors.Is(err, agentService.ErrInvalidAgentStatus) {
 			response.Write(c, http.StatusBadRequest, err.Error(), nil)
@@ -268,13 +272,15 @@ func (h *AgentHandler) Update(c *gin.Context) {
 		return
 	}
 
+	claims := middleware.UserClaimsFromContext(c)
+
 	a, err := h.svc.Update(c.Request.Context(), id, agentService.UpdateAgentInput{
 		Name:      req.Name,
 		Hostname:  req.Hostname,
 		IPAddress: req.IPAddress,
 		Version:   req.Version,
 		Status:    req.Status,
-	})
+	}, claims, c.ClientIP())
 	if err != nil {
 		if errors.Is(err, agentService.ErrAgentNotFound) {
 			response.Write(c, http.StatusNotFound, "agent not found", nil)
@@ -299,7 +305,9 @@ func (h *AgentHandler) Delete(c *gin.Context) {
 		return
 	}
 
-	if err := h.svc.Delete(c.Request.Context(), id); err != nil {
+	claims := middleware.UserClaimsFromContext(c)
+
+	if err := h.svc.Delete(c.Request.Context(), id, claims, c.ClientIP()); err != nil {
 		if errors.Is(err, agentService.ErrAgentNotFound) {
 			response.Write(c, http.StatusNotFound, "agent not found", nil)
 			return

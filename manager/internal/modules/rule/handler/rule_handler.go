@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/hildanku/xemarify/internal/infrastructure/middleware"
 	"github.com/hildanku/xemarify/internal/modules/rule/domain"
 	ruleRepo "github.com/hildanku/xemarify/internal/modules/rule/repository"
 	ruleService "github.com/hildanku/xemarify/internal/modules/rule/service"
@@ -106,11 +107,14 @@ func (h *RuleHandler) Create(c *gin.Context) {
 		tags = []string{}
 	}
 
+	claims := middleware.UserClaimsFromContext(c)
+
 	r, err := h.svc.Create(c.Request.Context(), ruleService.CreateRuleInput{
 		Name:        req.Name,
 		Description: req.Description,
 		Level:       req.Level,
 		Enabled:     req.Enabled,
+		CreatedByID: &claims.UserID,
 		Condition: domain.RuleCondition{
 			Type:                  req.Condition.Type,
 			EventType:             req.Condition.EventType,
@@ -126,7 +130,7 @@ func (h *RuleHandler) Create(c *gin.Context) {
 			AnomalyMinCount:       req.Condition.AnomalyMinCount,
 		},
 		Tags: tags,
-	})
+	}, claims, c.ClientIP())
 	if err != nil {
 		if errors.Is(err, ruleService.ErrInvalidRuleCondition) {
 			response.Write(c, http.StatusBadRequest, err.Error(), nil)
@@ -201,7 +205,9 @@ func (h *RuleHandler) Update(c *gin.Context) {
 		input.Condition = cond
 	}
 
-	r, err := h.svc.Update(c.Request.Context(), id, input)
+	claims := middleware.UserClaimsFromContext(c)
+
+	r, err := h.svc.Update(c.Request.Context(), id, input, claims, c.ClientIP())
 	if err != nil {
 		if errors.Is(err, ruleService.ErrInvalidRuleCondition) {
 			response.Write(c, http.StatusBadRequest, err.Error(), nil)
@@ -227,7 +233,9 @@ func (h *RuleHandler) Delete(c *gin.Context) {
 		return
 	}
 
-	if err := h.svc.Delete(c.Request.Context(), id); err != nil {
+	claims := middleware.UserClaimsFromContext(c)
+
+	if err := h.svc.Delete(c.Request.Context(), id, claims, c.ClientIP()); err != nil {
 		h.log.WithError(err).Error("failed to delete rule")
 		response.Write(c, http.StatusInternalServerError, "internal server error", nil)
 		return

@@ -74,7 +74,8 @@ func main() {
 	alertRepository := alertRepo.NewPgAlertRepository(db)
 
 	// Services
-	agentSvc := agentService.NewAgentService(agentRepository, log)
+	auditLogService := auditService.NewAuditLogService(auditLogRepository, log)
+	agentSvc := agentService.NewAgentService(agentRepository, auditLogService, log)
 	ruleEngine, err := engine.NewRuleEngine(context.Background(), db, log)
 	if err != nil {
 		log.WithError(err).Fatal("failed to initialize rule engine")
@@ -82,11 +83,10 @@ func main() {
 	defer ruleEngine.Stop()
 
 	evtService := eventService.NewEventService(eventRepository, ruleEngine, m, log)
-	auditLogService := auditService.NewAuditLogService(auditLogRepository, log)
 	authSvc := authService.NewAuthService(userRepository, authRepository, auditLogService, cfg.JWT, log)
 	userSvc := userService.NewUserService(db, userRepository, auditLogService, log)
-	ruleSvc := ruleService.NewRuleService(ruleRepository, ruleEngine, log)
-	alertSvc := alertService.NewAlertService(alertRepository, log)
+	ruleSvc := ruleService.NewRuleService(ruleRepository, ruleEngine, auditLogService, log)
+	alertSvc := alertService.NewAlertService(alertRepository, auditLogService, log)
 	agentHandle := agentHandler.NewAgentHandler(agentSvc, log)
 	evtHandler := eventHandler.NewEventHandler(evtService, m, log)
 

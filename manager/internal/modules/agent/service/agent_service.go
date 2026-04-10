@@ -13,6 +13,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/hildanku/xemarify/internal/modules/agent/domain"
 	agentRepo "github.com/hildanku/xemarify/internal/modules/agent/repository"
+	auditDomain "github.com/hildanku/xemarify/internal/modules/audit/domain"
+	auditService "github.com/hildanku/xemarify/internal/modules/audit/service"
+	jwtpkg "github.com/hildanku/xemarify/pkg/jwt"
 	"github.com/sirupsen/logrus"
 )
 
@@ -27,13 +30,14 @@ var ErrAgentIdentityMismatch = errors.New("agent identity mismatch")
 // AgentService handles business logic for the agent resource.
 type AgentService struct {
 	repo            agentRepo.AgentRepository
+	auditSvc        *auditService.AuditLogService
 	log             *logrus.Logger
 	heartbeatStates sync.Map
 }
 
 // NewAgentService constructs the service with its required dependencies.
-func NewAgentService(repo agentRepo.AgentRepository, log *logrus.Logger) *AgentService {
-	return &AgentService{repo: repo, log: log}
+func NewAgentService(repo agentRepo.AgentRepository, auditSvc *auditService.AuditLogService, log *logrus.Logger) *AgentService {
+	return &AgentService{repo: repo, auditSvc: auditSvc, log: log}
 }
 
 // List returns a filtered, sorted, paginated list of agents and the total match count.
@@ -77,7 +81,7 @@ type heartbeatState struct {
 	UpdatedAt  time.Time
 }
 
-func (s *AgentService) Create(ctx context.Context, input CreateAgentInput) (*domain.Agent, error) {
+func (s *AgentService) Create(ctx context.Context, input CreateAgentInput, actor *jwtpkg.Claims, ip string) (*domain.Agent, error) {
 	status, err := normalizeStatus(input.Status)
 	if err != nil {
 		return nil, err
@@ -100,6 +104,20 @@ func (s *AgentService) Create(ctx context.Context, input CreateAgentInput) (*dom
 	if err := s.repo.Create(ctx, agent); err != nil {
 		return nil, err
 	}
+
+	s.auditSvc.Log(ctx, &auditDomain.AuditLog{
+		UserID:         &actor.UserID,
+		UserIdentifier: actor.Username,
+		Action:         auditDomain.ActionCreateAgent,
+		ObjectType:     strPtr(auditDomain.ObjectTypeAgent),
+		ObjectID:       &agent.ID,
+		Metadata: map[string]interface{}{
+			"agent_name": agent.Name,
+			"hostname":   agent.Hostname,
+			"status":     agent.Status,
+			"ip_address": ip,
+		},
+	})
 
 	return agent, nil
 }
@@ -140,6 +158,19 @@ func (s *AgentService) Register(ctx context.Context, input RegisterInput) (*Regi
 		return nil, err
 	}
 
+	s.auditSvc.Log(ctx, &auditDomain.AuditLog{
+		Action:         auditDomain.ActionRegisterAgent,
+		UserIdentifier: agent.Name,
+		ObjectType:     strPtr(auditDomain.ObjectTypeAgent),
+		ObjectID:       &agent.ID,
+		Metadata: map[string]interface{}{
+			"agent_name": agent.Name,
+			"hostname":   agent.Hostname,
+			"ip_address": agent.IPAddress,
+			"version":    agent.Version,
+		},
+	})
+
 	return &RegisterResult{
 		AgentID: agent.ID.String(),
 		Key:     sessionKey,
@@ -177,7 +208,7 @@ func (s *AgentService) Heartbeat(ctx context.Context, input HeartbeatInput) erro
 	return nil
 }
 
-func (s *AgentService) GenerateEnrollmentKey(ctx context.Context) (string, error) {
+func (s *AgentService) GenerateEnrollmentKey(ctx context.Context, actor *jwtpkg.Claims, ip string) (string, error) {
 	key, err := generateSessionKey()
 	if err != nil {
 		return "", err
@@ -186,6 +217,16 @@ func (s *AgentService) GenerateEnrollmentKey(ctx context.Context) (string, error
 	if err := s.repo.CreateEnrollmentKey(ctx, key); err != nil {
 		return "", err
 	}
+
+	s.auditSvc.Log(ctx, &auditDomain.AuditLog{
+		UserID:         &actor.UserID,
+		UserIdentifier: actor.Username,
+		Action:         auditDomain.ActionGenerateEnrollmentKey,
+		ObjectType:     strPtr(auditDomain.ObjectTypeEnrollmentKey),
+		Metadata: map[string]interface{}{
+			"ip_address": ip,
+		},
+	})
 
 	return key, nil
 }
@@ -209,7 +250,7 @@ type UpdateAgentInput struct {
 	Status    string
 }
 
-func (s *AgentService) Update(ctx context.Context, id uuid.UUID, input UpdateAgentInput) (*domain.Agent, error) {
+func (s *AgentService) Update(ctx context.Context, id uuid.UUID, input UpdateAgentInput, actor *jwtpkg.Claims, ip string) (*domain.Agent, error) {
 	a, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
@@ -218,16 +259,33 @@ func (s *AgentService) Update(ctx context.Context, id uuid.UUID, input UpdateAge
 		return nil, ErrAgentNotFound
 	}
 
+	var changedFields []string
+
 	status, err := normalizeStatus(input.Status)
 	if err != nil {
 		return nil, err
 	}
 
-	a.Name = strings.TrimSpace(input.Name)
-	a.Hostname = strings.TrimSpace(input.Hostname)
-	a.IPAddress = strings.TrimSpace(input.IPAddress)
-	a.Version = strings.TrimSpace(input.Version)
-	a.Status = status
+	if trimmed := strings.TrimSpace(input.Name); trimmed != a.Name {
+		changedFields = append(changedFields, "name")
+		a.Name = trimmed
+	}
+	if trimmed := strings.TrimSpace(input.Hostname); trimmed != a.Hostname {
+		changedFields = append(changedFields, "hostname")
+		a.Hostname = trimmed
+	}
+	if trimmed := strings.TrimSpace(input.IPAddress); trimmed != a.IPAddress {
+		changedFields = append(changedFields, "ip_address")
+		a.IPAddress = trimmed
+	}
+	if trimmed := strings.TrimSpace(input.Version); trimmed != a.Version {
+		changedFields = append(changedFields, "version")
+		a.Version = trimmed
+	}
+	if status != a.Status {
+		changedFields = append(changedFields, "status")
+		a.Status = status
+	}
 
 	if err := s.repo.Update(ctx, id, a); err != nil {
 		return nil, err
@@ -241,10 +299,22 @@ func (s *AgentService) Update(ctx context.Context, id uuid.UUID, input UpdateAge
 		return nil, ErrAgentNotFound
 	}
 
+	s.auditSvc.Log(ctx, &auditDomain.AuditLog{
+		UserID:         &actor.UserID,
+		UserIdentifier: actor.Username,
+		Action:         auditDomain.ActionUpdateAgent,
+		ObjectType:     strPtr(auditDomain.ObjectTypeAgent),
+		ObjectID:       &id,
+		Metadata: map[string]interface{}{
+			"changed_fields": changedFields,
+			"ip_address":     ip,
+		},
+	})
+
 	return updated, nil
 }
 
-func (s *AgentService) Delete(ctx context.Context, id uuid.UUID) error {
+func (s *AgentService) Delete(ctx context.Context, id uuid.UUID, actor *jwtpkg.Claims, ip string) error {
 	a, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return err
@@ -253,7 +323,24 @@ func (s *AgentService) Delete(ctx context.Context, id uuid.UUID) error {
 		return ErrAgentNotFound
 	}
 
-	return s.repo.Delete(ctx, id)
+	if err := s.repo.Delete(ctx, id); err != nil {
+		return err
+	}
+
+	s.auditSvc.Log(ctx, &auditDomain.AuditLog{
+		UserID:         &actor.UserID,
+		UserIdentifier: actor.Username,
+		Action:         auditDomain.ActionDeleteAgent,
+		ObjectType:     strPtr(auditDomain.ObjectTypeAgent),
+		ObjectID:       &id,
+		Metadata: map[string]interface{}{
+			"deleted_agent_name": a.Name,
+			"hostname":           a.Hostname,
+			"ip_address":         ip,
+		},
+	})
+
+	return nil
 }
 
 func normalizeStatus(status string) (domain.AgentStatus, error) {
@@ -278,3 +365,5 @@ func generateSessionKey() (string, error) {
 
 	return hex.EncodeToString(raw), nil
 }
+
+func strPtr(s string) *string { return &s }
