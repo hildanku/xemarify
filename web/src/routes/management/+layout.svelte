@@ -1,5 +1,6 @@
 <script lang="ts">
 	import AppSidebar from "$lib/components/app-sidebar.svelte";
+	import ThemeModeToggle from "../../lib/components/theme-mode-toggle.svelte";
 	import * as Breadcrumb from "$lib/components/ui/breadcrumb/index.js";
 	import { Separator } from "$lib/components/ui/separator/index.js";
 	import * as Sidebar from "$lib/components/ui/sidebar/index.js";
@@ -31,25 +32,29 @@
 	<AppSidebar />
 	<Sidebar.Inset>
 		<header class="flex h-16 shrink-0 items-center gap-2 border-b bg-background">
-			<div class="flex items-center gap-2 px-4">
-				<Sidebar.Trigger class="-ms-1" />
-				<Separator orientation="vertical" class="me-2 data-[orientation=vertical]:h-4" />
-				<Breadcrumb.Root>
-					<Breadcrumb.List>
-						{#each breadcrumbs as crumb, index}
-							{#if index > 0}
-								<Breadcrumb.Separator />
-							{/if}
-							<Breadcrumb.Item class={index === 0 ? 'hidden md:block' : ''}>
-								{#if index === breadcrumbs.length - 1}
-									<Breadcrumb.Page>{crumb.title}</Breadcrumb.Page>
-								{:else}
-									<Breadcrumb.Link href={crumb.path}>{crumb.title}</Breadcrumb.Link>
+			<div class="flex w-full items-center justify-between px-4">
+				<div class="flex items-center gap-2">
+					<Sidebar.Trigger class="-ms-1" />
+					<Separator orientation="vertical" class="me-2 data-[orientation=vertical]:h-4" />
+					<Breadcrumb.Root>
+						<Breadcrumb.List>
+							{#each breadcrumbs as crumb, index}
+								{#if index > 0}
+									<Breadcrumb.Separator />
 								{/if}
-							</Breadcrumb.Item>
-						{/each}
-					</Breadcrumb.List>
-				</Breadcrumb.Root>
+								<Breadcrumb.Item class={index === 0 ? 'hidden md:block' : ''}>
+									{#if index === breadcrumbs.length - 1}
+										<Breadcrumb.Page>{crumb.title}</Breadcrumb.Page>
+									{:else}
+										<Breadcrumb.Link href={crumb.path}>{crumb.title}</Breadcrumb.Link>
+									{/if}
+								</Breadcrumb.Item>
+							{/each}
+						</Breadcrumb.List>
+					</Breadcrumb.Root>
+				</div>
+
+				<ThemeModeToggle />
 			</div>
 		</header>
 		<div class="flex flex-1 flex-col">
