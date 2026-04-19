@@ -25,7 +25,7 @@
     function getNavMain(role?: UserRole) {
         const items = [
             {
-                title: 'management',
+                title: 'Dashboard',
                 url: '/management',
                 icon: LayoutmanagementIcon,
                 isActive: true,
