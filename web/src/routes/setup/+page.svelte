@@ -1,51 +1,52 @@
 <script lang="ts">
 	import { goto } from '$app/navigation'
 	import { createMutation } from '@tanstack/svelte-query'
-	import ShieldCheck from '@lucide/svelte/icons/shield-check'
+	import { z } from 'zod'
+	import { superForm, defaults } from 'sveltekit-superforms'
+	import { zod4Client, zod4 } from 'sveltekit-superforms/adapters'
 	import ShieldAlert from '@lucide/svelte/icons/shield-alert'
 	import KeyRound from '@lucide/svelte/icons/key-round'
 	import UserRoundCog from '@lucide/svelte/icons/user-round-cog'
+	import ArrowRight from '@lucide/svelte/icons/arrow-right'
+	import Lock from '@lucide/svelte/icons/lock'
 	import { toast } from 'svelte-sonner'
 	import { writeSession } from '$lib/auth/session'
 	import { Button } from '$lib/components/ui/button'
 	import { Badge } from '$lib/components/ui/badge'
 	import {
-		Card,
-		CardContent,
-		CardDescription,
-		CardHeader,
-		CardTitle,
-	} from '$lib/components/ui/card'
-	import {
 		Field,
 		FieldDescription,
 		FieldError,
-		FieldGroup,
 		FieldLabel,
-		FieldSeparator,
 	} from '$lib/components/ui/field'
 	import { Input } from '$lib/components/ui/input'
 	import { Separator } from '$lib/components/ui/separator'
 	import { initializeFirstManager } from '$lib/setup/system'
 
-	let username = $state('')
-	let email = $state('')
-	let password = $state('')
-	let confirmPassword = $state('')
-	let setupToken = $state('')
 	let formError = $state('')
 
-	const initializeMutation = createMutation(() => ({
-		mutationFn: async () => {
-			if (password !== confirmPassword) {
-				throw new Error('Password confirmation does not match')
-			}
+	const setupSchema = z
+		.object({
+			username: z.string().trim().min(3, 'Username must be at least 3 characters'),
+			email: z.string().trim().email('Please enter a valid email address'),
+			password: z.string().min(8, 'Password must be at least 8 characters'),
+			confirmPassword: z.string().min(1, 'Please confirm your password'),
+			setupToken: z.string().trim().min(1, 'Setup token is required'),
+		})
+		.refine((value) => value.password === value.confirmPassword, {
+			path: ['confirmPassword'],
+			message: 'Password confirmation does not match',
+		})
 
+	type SetupFormData = z.infer<typeof setupSchema>
+
+	const initializeMutation = createMutation(() => ({
+		mutationFn: async (input: SetupFormData) => {
 			return initializeFirstManager({
-				username,
-				email,
-				password,
-				setupToken,
+				username: input.username,
+				email: input.email,
+				password: input.password,
+				setupToken: input.setupToken,
 			})
 		},
 		onSuccess: async (tokens) => {
@@ -59,142 +60,190 @@
 		},
 	}))
 
-	function handleSubmit(event: Event) {
-		event.preventDefault()
-		formError = ''
-		initializeMutation.mutate()
-	}
+	const form = superForm(defaults(zod4(setupSchema)), {
+		validators: zod4Client(setupSchema),
+		SPA: true,
+		onUpdate({ form: fd }) {
+			if (fd.valid) {
+				formError = ''
+				initializeMutation.mutate(fd.data)
+			}
+		},
+	})
+
+	const { form: formData, errors, enhance } = form
+
+	const infoCards = [
+		{
+			icon: UserRoundCog,
+			title: 'One time only',
+			description: 'This page closes after the first manager is created.',
+		},
+		{
+			icon: KeyRound,
+			title: 'Token required',
+			description: 'Use your setup token from environment config.',
+		},
+		{
+			icon: ShieldAlert,
+			title: 'Auto sign in',
+			description: "You're signed in and redirected upon success.",
+		},
+	]
 </script>
 
 <svelte:head>
-	<title>Initial Setup</title>
+	<title>Xemarify - Setup</title>
 </svelte:head>
 
-<div class="from-background via-muted/30 to-background min-h-svh bg-gradient-to-br">
-	<div class="mx-auto grid min-h-svh max-w-7xl gap-8 px-6 py-10 lg:grid-cols-[1.05fr_0.95fr] lg:px-10">
-		<div class="flex flex-col justify-center gap-6">
+<div class="bg-muted/40 min-h-svh">
+	<div class="mx-auto grid min-h-svh max-w-6xl lg:grid-cols-2">
+		<div class="border-border/50 flex flex-col justify-center gap-8 border-r bg-white px-10 py-12">
 			<div class="flex items-center gap-3">
-				<div class="bg-primary text-primary-foreground flex size-10 items-center justify-center rounded-xl border shadow-sm">
-					<ShieldCheck class="size-5" />
-				</div>
 				<div>
-					<p class="text-sm font-semibold tracking-wide">Xemarify</p>
-					<p class="text-muted-foreground text-sm">Manager initialization</p>
+					<p class="font-mono text-sm font-semibold tracking-tight">Xemarify</p>
+					<p class="text-muted-foreground text-xs">Setup manager</p>
 				</div>
 			</div>
 
-			<div class="space-y-4">
-				<Badge variant="secondary" class="w-fit">First-run setup</Badge>
-				<h1 class="max-w-2xl text-4xl font-semibold tracking-tight text-balance md:text-5xl">
-					Initialize the first manager before the instance accepts normal logins.
+			<div class="space-y-3">
+				<Badge variant="outline" class="text-muted-foreground rounded-full text-xs font-normal">
+					First-run setup
+				</Badge>
+				<h1 class="text-3xl font-semibold tracking-tight">
+					Create the first<br />manager account.
 				</h1>
-				<p class="text-muted-foreground max-w-xl text-base leading-7">
-					This claims the instance, creates the initial manager account, and immediately closes setup mode for everyone else.
+				<p class="text-muted-foreground text-sm leading-relaxed">
+					Complete this once to unlock access to the dashboard.
 				</p>
 			</div>
 
-			<div class="grid gap-4 md:grid-cols-3">
-				<Card class="gap-4">
-					<CardHeader class="gap-3 px-5">
-						<div class="bg-muted flex size-10 items-center justify-center rounded-lg border">
-							<UserRoundCog class="text-muted-foreground size-5" />
+			<div class="space-y-2">
+				{#each infoCards as card}
+					<div class="border-border/50 flex items-start gap-3 rounded-lg border bg-white p-3.5">
+						<div class="bg-muted border-border/40 mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md border">
+							<card.icon class="text-muted-foreground size-3.5" />
 						</div>
-						<CardTitle class="text-base">One-time ownership</CardTitle>
-						<CardDescription>
-							After the first manager exists, this setup page is no longer reachable.
-						</CardDescription>
-					</CardHeader>
-				</Card>
-
-				<Card class="gap-4">
-					<CardHeader class="gap-3 px-5">
-						<div class="bg-muted flex size-10 items-center justify-center rounded-lg border">
-							<KeyRound class="text-muted-foreground size-5" />
+						<div>
+							<p class="text-sm font-medium">{card.title}</p>
+							<p class="text-muted-foreground mt-0.5 text-xs leading-relaxed">{card.description}</p>
 						</div>
-						<CardTitle class="text-base">Token protected</CardTitle>
-						<CardDescription>
-							Use the bootstrap secret configured in `MANAGER_SETUP_TOKEN`.
-						</CardDescription>
-					</CardHeader>
-				</Card>
-
-				<Card class="gap-4">
-					<CardHeader class="gap-3 px-5">
-						<div class="bg-muted flex size-10 items-center justify-center rounded-lg border">
-							<ShieldAlert class="text-muted-foreground size-5" />
-						</div>
-						<CardTitle class="text-base">Session ready</CardTitle>
-						<CardDescription>
-							Successful setup signs you in directly and redirects to management.
-						</CardDescription>
-					</CardHeader>
-				</Card>
+					</div>
+				{/each}
 			</div>
 		</div>
 
-		<div class="flex items-center justify-center">
-			<Card class="w-full max-w-lg gap-0">
-				<CardHeader class="px-6">
-					<CardTitle class="text-2xl">Create initial manager</CardTitle>
-					<CardDescription>
-						This account will own user, rule, agent, and audit administration for the instance.
-					</CardDescription>
-				</CardHeader>
-				<Separator />
-				<CardContent class="px-6 pt-6">
-					<form class="flex flex-col gap-6" onsubmit={handleSubmit}>
-						<FieldGroup>
-							<Field>
-								<FieldLabel for="username">Username</FieldLabel>
-								<Input id="username" bind:value={username} placeholder="manager" required />
-							</Field>
+		<div class="flex items-center justify-center bg-white px-10 py-12">
+			<div class="w-full max-w-md space-y-6">
+				<div>
+					<h2 class="text-xl font-semibold tracking-tight">Create manager</h2>
+					<p class="text-muted-foreground mt-1 text-sm">Use this account to manage the system.</p>
+				</div>
 
-							<Field>
-								<FieldLabel for="email">Email</FieldLabel>
-								<Input
-									id="email"
-									type="email"
-									bind:value={email}
-									placeholder="manager@example.com"
-									required
-								/>
-							</Field>
+				<form method="POST" use:enhance class="space-y-5">
+					<div class="grid grid-cols-2 gap-3">
+						<Field>
+							<FieldLabel class="text-xs uppercase tracking-wide" for="username">Username</FieldLabel>
+							<Input
+								id="username"
+								bind:value={$formData.username}
+								placeholder="manager"
+								class="h-9 text-sm"
+							/>
+							{#if $errors.username}
+								<FieldError class="text-xs">{$errors.username[0]}</FieldError>
+							{/if}
+						</Field>
 
-							<Field>
-								<FieldLabel for="password">Password</FieldLabel>
-								<Input id="password" type="password" bind:value={password} required />
-								<FieldDescription>
-									Use a strong password with at least 8 characters.
-								</FieldDescription>
-							</Field>
+						<Field>
+							<FieldLabel class="text-xs uppercase tracking-wide" for="email">Email</FieldLabel>
+							<Input
+								id="email"
+								type="email"
+								bind:value={$formData.email}
+								placeholder="you@example.com"
+								class="h-9 text-sm"
+							/>
+							{#if $errors.email}
+								<FieldError class="text-xs">{$errors.email[0]}</FieldError>
+							{/if}
+						</Field>
+					</div>
 
-							<Field>
-								<FieldLabel for="confirm-password">Confirm password</FieldLabel>
-								<Input id="confirm-password" type="password" bind:value={confirmPassword} required />
-							</Field>
+					<div class="grid grid-cols-2 gap-3">
+						<Field>
+							<FieldLabel class="text-xs uppercase tracking-wide" for="password">Password</FieldLabel>
+							<Input
+								id="password"
+								type="password"
+								bind:value={$formData.password}
+								placeholder="••••••••"
+								class="h-9 text-sm"
+							/>
+							<FieldDescription class="text-xs">Min. 8 characters.</FieldDescription>
+							{#if $errors.password}
+								<FieldError class="text-xs">{$errors.password[0]}</FieldError>
+							{/if}
+						</Field>
 
-							<FieldSeparator>Bootstrap Access</FieldSeparator>
+						<Field>
+							<FieldLabel class="text-xs uppercase tracking-wide" for="confirm-password">Confirm</FieldLabel>
+							<Input
+								id="confirm-password"
+								type="password"
+								bind:value={$formData.confirmPassword}
+								placeholder="••••••••"
+								class="h-9 text-sm"
+							/>
+							{#if $errors.confirmPassword}
+								<FieldError class="text-xs">{$errors.confirmPassword[0]}</FieldError>
+							{/if}
+						</Field>
+					</div>
 
-							<Field>
-								<FieldLabel for="setup-token">Setup token</FieldLabel>
-								<Input id="setup-token" type="password" bind:value={setupToken} required />
-								<FieldDescription>
-									Paste the value configured in `MANAGER_SETUP_TOKEN`.
-								</FieldDescription>
-								{#if formError}
-									<FieldError>{formError}</FieldError>
-								{/if}
-							</Field>
+					<div class="flex items-center gap-3">
+						<Separator class="flex-1" />
+						<span class="text-muted-foreground text-[10px] uppercase tracking-widest">
+							Bootstrap access
+						</span>
+						<Separator class="flex-1" />
+					</div>
 
-							<Field>
-								<Button type="submit" class="w-full" disabled={initializeMutation.isPending}>
-									{initializeMutation.isPending ? 'Creating manager...' : 'Create initial manager'}
-								</Button>
-							</Field>
-						</FieldGroup>
-					</form>
-				</CardContent>
-			</Card>
+					<Field>
+						<FieldLabel class="text-xs uppercase tracking-wide" for="setup-token">Setup token</FieldLabel>
+						<div class="relative">
+							<Lock class="text-muted-foreground absolute top-1/2 left-3 size-3.5 -translate-y-1/2" />
+							<Input
+								id="setup-token"
+								type="password"
+								bind:value={$formData.setupToken}
+								placeholder="Paste your setup token"
+								class="h-9 pl-9 text-sm"
+							/>
+						</div>
+						<FieldDescription class="text-xs">Found in your environment configuration.</FieldDescription>
+						{#if $errors.setupToken}
+							<FieldError class="text-xs">{$errors.setupToken[0]}</FieldError>
+						{/if}
+						{#if formError}
+							<FieldError class="text-xs">{formError}</FieldError>
+						{/if}
+					</Field>
+
+					<Button
+						type="submit"
+						class="h-9 w-full text-sm"
+						disabled={initializeMutation.isPending}
+					>
+						{#if initializeMutation.isPending}
+							Creating manager...
+						{:else}
+							Create initial manager
+							<ArrowRight class="ml-1.5 size-3.5" />
+						{/if}
+					</Button>
+				</form>
+			</div>
 		</div>
 	</div>
 </div>
