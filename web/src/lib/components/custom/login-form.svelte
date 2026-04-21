@@ -1,4 +1,7 @@
 <script lang='ts'>
+    import { z } from 'zod'
+    import { superForm, defaults } from 'sveltekit-superforms'
+    import { zod4, zod4Client } from 'sveltekit-superforms/adapters'
     import {
         FieldGroup,
         Field,
@@ -23,13 +26,29 @@
     }: WithElementRef<HTMLFormAttributes> = $props()
     const id = $props.id()
 
+    const loginSchema = z.object({
+        email: z.string().email('Invalid email address'),
+        password: z.string().min(1, 'Password is required'),
+    })
 
-    let email = $state('')
-    let password = $state('')
+    const form = superForm(defaults(zod4(loginSchema)), {
+        validators: zod4Client(loginSchema),
+        SPA: true,
+        onUpdate({ form: fd }) {
+            if (fd.valid) {
+                loginMutation.mutate({
+                    email: fd.data.email,
+                    password: fd.data.password,
+                })
+            }
+        },
+    })
+
+    const { form: formData, enhance, errors } = form
 
     const loginMutation = createMutation(() => ({
-        mutationFn: async () => {
-            return login(email, password)
+        mutationFn: async (credentials: { email: string; password: string }) => {
+            return login(credentials.email, credentials.password)
         },
         onSuccess: async (session) => {
             toast.success('Login successful!')
@@ -41,18 +60,14 @@
         },
     })
 )
-
-    function handleSubmit(event: Event) {
-        event.preventDefault()
-        loginMutation.mutate()
-    }
 </script>
 
 <form
     class={cn("flex flex-col gap-6", className)}
     bind:this={ref}
     {...restProps}
-    onsubmit={handleSubmit}
+    method="POST"
+    use:enhance
 >
     <FieldGroup>
         <div class="flex flex-col items-center gap-1 text-center">
@@ -67,9 +82,12 @@
                 id="email-{id}"
                 type="email"
                 placeholder="m@example.com"
-                bind:value={email}
+                bind:value={$formData.email}
                 required
             />
+            {#if $errors.email}
+                <p class="text-destructive text-xs">{$errors.email}</p>
+            {/if}
         </Field>
         <Field>
             <div class="flex items-center">
@@ -81,7 +99,10 @@
                     Forgot your password?
                 </a>
             </div>
-            <Input id="password-{id}" type="password" required bind:value={password} />
+            <Input id="password-{id}" type="password" required bind:value={$formData.password} />
+            {#if $errors.password}
+                <p class="text-destructive text-xs">{$errors.password}</p>
+            {/if}
         </Field>
         <Field>
             <Button type="submit" disabled={loginMutation.isPending} >Login</Button>
