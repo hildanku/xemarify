@@ -207,6 +207,7 @@ export async function logout(options?: { remote?: boolean }) {
 				})
 			}
 		}
+	} catch {
 	} finally {
 		clearSession()
 	}

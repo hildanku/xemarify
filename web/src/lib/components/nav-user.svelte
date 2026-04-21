@@ -10,6 +10,8 @@
 	import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
 	import * as Sidebar from "$lib/components/ui/sidebar/index.js";
 	import { useSidebar } from "$lib/components/ui/sidebar/index.js";
+	import { goto } from '$app/navigation'
+	import { resolve } from '$app/paths'
 	import { logout } from '$lib/auth/session'
 
 	let {
@@ -25,7 +27,11 @@
 	const sidebar = useSidebar();
 
 	async function handleLogout() {
-		await logout()
+		try {
+			await logout()
+		} finally {
+			await goto(resolve('/auth/login'), { replaceState: true })
+		}
 	}
 </script>
 
