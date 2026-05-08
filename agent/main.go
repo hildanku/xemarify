@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	configPath      = "/etc/xemarify/agent.yaml"
+	configPath      = "/etc/xemarify-agent/agent.yaml"
 	batchSize       = 100
 	batchFlushEvery = 2 * time.Second
 	retryBaseDelay  = 1 * time.Second

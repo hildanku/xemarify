@@ -1,0 +1,32 @@
+server:
+  endpoint: "__MANAGER_ENDPOINT__"
+  insecure: __INSECURE_TLS__
+
+enrollment_token: "__ENROLLMENT_TOKEN__"
+
+disk_buffer:
+  path: "/var/lib/xemarify-agent/spool/events.log"
+  max_bytes: 524288000
+
+agent:
+  id: ""
+  agent_secret: ""
+  name: ""
+  hostname: ""
+  ip_address: ""
+
+syslog:
+  listen: ":5514"
+
+filelog:
+  enabled: true
+  poll_interval: 5s
+  paths:
+    - /var/log/syslog
+    - /var/log/auth.log
+    - /var/log/nginx/access.log
+    - /var/log/nginx/error.log
+
+inventory:
+  enabled: true
+  interval: 5m

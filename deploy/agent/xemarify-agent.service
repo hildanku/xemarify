@@ -1,0 +1,19 @@
+[Unit]
+Description=Xemarify Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/xemarify-agent
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/etc/xemarify-agent /var/lib/xemarify-agent
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
