@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation'
 	import { onMount } from 'svelte'
+	import { getDefaultRouteForUser } from '$lib/auth/guard'
 	import { bootstrapSession } from '$lib/auth/session'
 	import { bootstrapSystemState } from '$lib/setup/system'
 
@@ -13,7 +14,9 @@
 
 		const state = await bootstrapSession()
 		await goto(
-			state.status === 'authenticated' ? '/management' : '/auth/login',
+			state.status === 'authenticated'
+				? getDefaultRouteForUser(state.user)
+				: '/auth/login',
 			{ replaceState: true },
 		)
 	})

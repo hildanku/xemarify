@@ -38,6 +38,14 @@ export const load = async ({ url }: { url: URL }) => {
 		throw redirect(302, getDefaultRouteForUser(state.user))
 	}
 
+	if (
+		state.status === 'authenticated' &&
+		url.pathname === resolve('/access-limited') &&
+		state.user?.role !== 'VIEWER'
+	) {
+		throw redirect(302, getDefaultRouteForUser(state.user))
+	}
+
 	if (!canAccessPath(url.pathname, state.user)) {
 		if (state.status !== 'authenticated') {
 			const loginUrl = new URL(resolve('/auth/login'), url.origin)
