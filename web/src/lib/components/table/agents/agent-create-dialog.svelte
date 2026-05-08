@@ -20,7 +20,7 @@
 			ip_address?: string
 			version?: string
 			status?: AgentStatus
-			key?: string
+			agent_secret?: string
 		}) => void
 		isPending?: boolean
 	} = $props()
@@ -35,7 +35,7 @@
 		ip_address: z.string().max(50).optional().default(''),
 		version: z.string().max(50).optional().default(''),
 		status: z.enum(STATUSES).default('OFFLINE'),
-		key: z.string().max(255).optional().default(''),
+		agent_secret: z.string().max(255).optional().default(''),
 	})
 
 	const form = superForm(defaults(zod4(createSchema)), {
@@ -49,7 +49,7 @@
 					ip_address?: string
 					version?: string
 					status?: AgentStatus
-					key?: string
+					agent_secret?: string
 				} = {
 					name: fd.data.name,
 					status: fd.data.status,
@@ -58,7 +58,7 @@
 				if (fd.data.hostname) payload.hostname = fd.data.hostname
 				if (fd.data.ip_address) payload.ip_address = fd.data.ip_address
 				if (fd.data.version) payload.version = fd.data.version
-				if (fd.data.key) payload.key = fd.data.key
+				if (fd.data.agent_secret) payload.agent_secret = fd.data.agent_secret
 
 				onCreate(payload)
 				open = false
@@ -143,13 +143,17 @@
 				<Form.FieldErrors class="text-xs" />
 			</Form.Field>
 
-			<Form.Field {form} name="key">
+			<Form.Field {form} name="agent_secret">
 				<Form.Control>
 					{#snippet children({ props })}
 						<Form.Label>
-							Agent Key <span class="text-muted-foreground text-xs">(optional)</span>
+							Agent Secret <span class="text-muted-foreground text-xs">(optional)</span>
 						</Form.Label>
-						<Input {...props} bind:value={$formData.key} placeholder="Optional agent key" />
+						<Input
+							{...props}
+							bind:value={$formData.agent_secret}
+							placeholder="Optional runtime secret"
+						/>
 					{/snippet}
 				</Form.Control>
 				<Form.FieldErrors class="text-xs" />

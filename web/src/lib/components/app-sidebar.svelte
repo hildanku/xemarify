@@ -60,8 +60,8 @@
                     icon: ServerIcon,
                 },
                 {
-                    title: 'Agent Keys',
-                    url: '/management/agent-keys',
+                    title: 'Enrollment Tokens',
+                    url: '/management/enrollment-tokens',
                     icon: ServerIcon,
                 },
             )

@@ -24,12 +24,12 @@ type ListAgentsQuery struct {
 }
 
 type CreateAgentRequest struct {
-	Name      string `json:"name" binding:"required,min=1,max=255"`
-	Hostname  string `json:"hostname"`
-	IPAddress string `json:"ip_address"`
-	Version   string `json:"version"`
-	Status    string `json:"status" binding:"omitempty,oneof=ONLINE OFFLINE"`
-	Key       string `json:"key"`
+	Name        string `json:"name" binding:"required,min=1,max=255"`
+	Hostname    string `json:"hostname"`
+	IPAddress   string `json:"ip_address"`
+	Version     string `json:"version"`
+	Status      string `json:"status" binding:"omitempty,oneof=ONLINE OFFLINE"`
+	AgentSecret string `json:"agent_secret"`
 }
 
 type UpdateAgentRequest struct {

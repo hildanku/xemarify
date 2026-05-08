@@ -22,7 +22,7 @@ type AgentHandler struct {
 	log *logrus.Logger
 }
 
-const agentKeyHeader = "X-Agent-Key"
+const enrollmentTokenHeader = "X-Enrollment-Token"
 
 // NewAgentHandler constructs an AgentHandler.
 func NewAgentHandler(svc *agentService.AgentService, log *logrus.Logger) *AgentHandler {
@@ -51,14 +51,14 @@ func (h *AgentHandler) RegisterAgentSession(rg *gin.RouterGroup) {
 
 // RegisterAdmin wires manager-only admin routes under /api/v1/admin.
 func (h *AgentHandler) RegisterAdmin(rg *gin.RouterGroup) {
-	rg.POST("/agent-keys", h.CreateEnrollmentKey)
+	rg.POST("/enrollment-tokens", h.CreateEnrollmentToken)
 }
 
 // RegisterAgent handles POST /api/v1/agents/register.
 func (h *AgentHandler) RegisterAgent(c *gin.Context) {
-	enrollmentKey := strings.TrimSpace(c.GetHeader(agentKeyHeader))
-	if enrollmentKey == "" {
-		response.Write(c, http.StatusUnauthorized, "missing X-Agent-Key header", nil)
+	enrollmentToken := strings.TrimSpace(c.GetHeader(enrollmentTokenHeader))
+	if enrollmentToken == "" {
+		response.Write(c, http.StatusUnauthorized, "missing X-Enrollment-Token header", nil)
 		return
 	}
 
@@ -69,16 +69,16 @@ func (h *AgentHandler) RegisterAgent(c *gin.Context) {
 	}
 
 	registered, err := h.svc.Register(c.Request.Context(), agentService.RegisterInput{
-		Name:          req.Name,
-		Hostname:      req.Hostname,
-		IPAddress:     req.IP,
-		OS:            req.OS,
-		Version:       req.Version,
-		EnrollmentKey: enrollmentKey,
+		Name:            req.Name,
+		Hostname:        req.Hostname,
+		IPAddress:       req.IP,
+		OS:              req.OS,
+		Version:         req.Version,
+		EnrollmentToken: enrollmentToken,
 	})
 	if err != nil {
-		if errors.Is(err, agentService.ErrInvalidEnrollmentKey) {
-			response.Write(c, http.StatusUnauthorized, "invalid enrollment key", nil)
+		if errors.Is(err, agentService.ErrInvalidEnrollmentToken) {
+			response.Write(c, http.StatusUnauthorized, "invalid enrollment token", nil)
 			return
 		}
 
@@ -88,8 +88,8 @@ func (h *AgentHandler) RegisterAgent(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, transport.RegisterResponse{
-		AgentID: registered.AgentID,
-		Key:     registered.Key,
+		AgentID:     registered.AgentID,
+		AgentSecret: registered.AgentSecret,
 	})
 }
 
@@ -131,18 +131,18 @@ func (h *AgentHandler) Heartbeat(c *gin.Context) {
 	response.Write(c, http.StatusOK, "heartbeat accepted", nil)
 }
 
-// CreateEnrollmentKey handles POST /api/v1/admin/agent-keys.
-func (h *AgentHandler) CreateEnrollmentKey(c *gin.Context) {
+// CreateEnrollmentToken handles POST /api/v1/admin/enrollment-tokens.
+func (h *AgentHandler) CreateEnrollmentToken(c *gin.Context) {
 	claims := middleware.UserClaimsFromContext(c)
 
-	key, err := h.svc.GenerateEnrollmentKey(c.Request.Context(), claims, c.ClientIP())
+	token, err := h.svc.GenerateEnrollmentToken(c.Request.Context(), claims, c.ClientIP())
 	if err != nil {
-		h.log.WithError(err).Error("failed to create enrollment key")
+		h.log.WithError(err).Error("failed to create enrollment token")
 		response.Write(c, http.StatusInternalServerError, "internal server error", nil)
 		return
 	}
 
-	c.JSON(http.StatusCreated, transport.CreateAgentKeyResponse{Key: key})
+	c.JSON(http.StatusCreated, transport.CreateEnrollmentTokenResponse{EnrollmentToken: token})
 }
 
 // List handles GET /api/v1/agents.
@@ -218,12 +218,12 @@ func (h *AgentHandler) Create(c *gin.Context) {
 	claims := middleware.UserClaimsFromContext(c)
 
 	a, err := h.svc.Create(c.Request.Context(), agentService.CreateAgentInput{
-		Name:      req.Name,
-		Hostname:  req.Hostname,
-		IPAddress: req.IPAddress,
-		Version:   req.Version,
-		Status:    req.Status,
-		Key:       req.Key,
+		Name:        req.Name,
+		Hostname:    req.Hostname,
+		IPAddress:   req.IPAddress,
+		Version:     req.Version,
+		Status:      req.Status,
+		AgentSecret: req.AgentSecret,
 	}, claims, c.ClientIP())
 	if err != nil {
 		if errors.Is(err, agentService.ErrInvalidAgentStatus) {

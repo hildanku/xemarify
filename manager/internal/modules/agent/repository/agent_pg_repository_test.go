@@ -54,7 +54,7 @@ func newTestPool(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
-// newTestAgent returns a valid Agent with a unique key so tests don't collide.
+// newTestAgent returns a valid Agent with a unique secret so tests don't collide.
 // NOTE: ip_address is stored as PostgreSQL inet; the value is returned as
 // CIDR notation (e.g. "192.168.1.100/32") when cast to text.
 func newTestAgent() *domain.Agent {
@@ -62,7 +62,7 @@ func newTestAgent() *domain.Agent {
 		ID:        uuid.New(),
 		Name:      "test-agent-" + uuid.New().String()[:8],
 		Hostname:  "host.local",
-		Key:       uuid.New().String(),
+		Secret:    uuid.New().String(),
 		IPAddress: "192.168.1.100",
 		Version:   "1.0.0",
 		Status:    domain.AgentStatusOffline,
@@ -143,8 +143,8 @@ func TestPgAgentRepository_GetByID(t *testing.T) {
 	if got.Name != agent.Name {
 		t.Errorf("GetByID: Name mismatch: want %q, got %q", agent.Name, got.Name)
 	}
-	if got.Key != agent.Key {
-		t.Errorf("GetByID: Key mismatch: want %q, got %q", agent.Key, got.Key)
+	if got.Secret != agent.Secret {
+		t.Errorf("GetByID: Secret mismatch: want %q, got %q", agent.Secret, got.Secret)
 	}
 	if got.IPAddress != inetText(agent.IPAddress) {
 		t.Errorf("GetByID: IPAddress mismatch: want %q, got %q", inetText(agent.IPAddress), got.IPAddress)
@@ -165,7 +165,7 @@ func TestPgAgentRepository_GetByID_NotFound(t *testing.T) {
 	}
 }
 
-func TestPgAgentRepository_GetByKey(t *testing.T) {
+func TestPgAgentRepository_GetBySecret(t *testing.T) {
 	pool := newTestPool(t)
 	repo := NewPgAgentRepository(pool)
 	ctx := context.Background()
@@ -176,29 +176,29 @@ func TestPgAgentRepository_GetByKey(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = repo.Delete(ctx, agent.ID) })
 
-	got, err := repo.GetByKey(ctx, agent.Key)
+	got, err := repo.GetBySecret(ctx, agent.Secret)
 	if err != nil {
-		t.Fatalf("GetByKey: unexpected error: %v", err)
+		t.Fatalf("GetBySecret: unexpected error: %v", err)
 	}
 	if got == nil {
-		t.Fatal("GetByKey: expected agent, got nil")
+		t.Fatal("GetBySecret: expected agent, got nil")
 	}
 	if got.ID != agent.ID {
-		t.Errorf("GetByKey: ID mismatch: want %s, got %s", agent.ID, got.ID)
+		t.Errorf("GetBySecret: ID mismatch: want %s, got %s", agent.ID, got.ID)
 	}
 }
 
-func TestPgAgentRepository_GetByKey_NotFound(t *testing.T) {
+func TestPgAgentRepository_GetBySecret_NotFound(t *testing.T) {
 	pool := newTestPool(t)
 	repo := NewPgAgentRepository(pool)
 	ctx := context.Background()
 
-	got, err := repo.GetByKey(ctx, "non-existent-key-xyz-"+uuid.New().String())
+	got, err := repo.GetBySecret(ctx, "non-existent-secret-xyz-"+uuid.New().String())
 	if err != nil {
-		t.Fatalf("GetByKey (not found): unexpected error: %v", err)
+		t.Fatalf("GetBySecret (not found): unexpected error: %v", err)
 	}
 	if got != nil {
-		t.Fatalf("GetByKey (not found): expected nil, got %+v", got)
+		t.Fatalf("GetBySecret (not found): expected nil, got %+v", got)
 	}
 }
 

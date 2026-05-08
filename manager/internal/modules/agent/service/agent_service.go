@@ -23,7 +23,7 @@ var ErrAgentNotFound = errors.New("agent not found")
 
 var ErrInvalidAgentStatus = errors.New("invalid agent status")
 
-var ErrInvalidEnrollmentKey = errors.New("invalid enrollment key")
+var ErrInvalidEnrollmentToken = errors.New("invalid enrollment token")
 
 var ErrAgentIdentityMismatch = errors.New("agent identity mismatch")
 
@@ -46,26 +46,26 @@ func (s *AgentService) List(ctx context.Context, filter agentRepo.ListFilter) ([
 }
 
 type CreateAgentInput struct {
-	Name      string
-	Hostname  string
-	IPAddress string
-	Version   string
-	Status    string
-	Key       string
+	Name        string
+	Hostname    string
+	IPAddress   string
+	Version     string
+	Status      string
+	AgentSecret string
 }
 
 type RegisterInput struct {
-	Name          string
-	Hostname      string
-	IPAddress     string
-	OS            string
-	Version       string
-	EnrollmentKey string
+	Name            string
+	Hostname        string
+	IPAddress       string
+	OS              string
+	Version         string
+	EnrollmentToken string
 }
 
 type RegisterResult struct {
-	AgentID string
-	Key     string
+	AgentID     string
+	AgentSecret string
 }
 
 type HeartbeatInput struct {
@@ -94,11 +94,11 @@ func (s *AgentService) Create(ctx context.Context, input CreateAgentInput, actor
 		IPAddress: strings.TrimSpace(input.IPAddress),
 		Version:   strings.TrimSpace(input.Version),
 		Status:    status,
-		Key:       strings.TrimSpace(input.Key),
+		Secret:    strings.TrimSpace(input.AgentSecret),
 	}
 
-	if agent.Key == "" {
-		agent.Key = uuid.NewString()
+	if agent.Secret == "" {
+		agent.Secret = uuid.NewString()
 	}
 
 	if err := s.repo.Create(ctx, agent); err != nil {
@@ -127,7 +127,7 @@ func (s *AgentService) Register(ctx context.Context, input RegisterInput) (*Regi
 	hostname := strings.TrimSpace(input.Hostname)
 	ipAddress := strings.TrimSpace(input.IPAddress)
 	version := strings.TrimSpace(input.Version)
-	enrollmentKey := strings.TrimSpace(input.EnrollmentKey)
+	enrollmentToken := strings.TrimSpace(input.EnrollmentToken)
 
 	if name == "" {
 		name = hostname
@@ -136,7 +136,7 @@ func (s *AgentService) Register(ctx context.Context, input RegisterInput) (*Regi
 		hostname = name
 	}
 
-	sessionKey, err := generateSessionKey()
+	agentSecret, err := generateSessionKey()
 	if err != nil {
 		return nil, err
 	}
@@ -148,12 +148,12 @@ func (s *AgentService) Register(ctx context.Context, input RegisterInput) (*Regi
 		IPAddress: ipAddress,
 		Version:   version,
 		Status:    domain.AgentStatusOnline,
-		Key:       sessionKey,
+		Secret:    agentSecret,
 	}
 
-	if err := s.repo.CreateWithEnrollmentKey(ctx, enrollmentKey, agent); err != nil {
-		if errors.Is(err, agentRepo.ErrEnrollmentKeyInvalid) {
-			return nil, ErrInvalidEnrollmentKey
+	if err := s.repo.CreateWithEnrollmentToken(ctx, enrollmentToken, agent); err != nil {
+		if errors.Is(err, agentRepo.ErrEnrollmentTokenInvalid) {
+			return nil, ErrInvalidEnrollmentToken
 		}
 		return nil, err
 	}
@@ -172,8 +172,8 @@ func (s *AgentService) Register(ctx context.Context, input RegisterInput) (*Regi
 	})
 
 	return &RegisterResult{
-		AgentID: agent.ID.String(),
-		Key:     sessionKey,
+		AgentID:     agent.ID.String(),
+		AgentSecret: agentSecret,
 	}, nil
 }
 
@@ -208,27 +208,27 @@ func (s *AgentService) Heartbeat(ctx context.Context, input HeartbeatInput) erro
 	return nil
 }
 
-func (s *AgentService) GenerateEnrollmentKey(ctx context.Context, actor *jwtpkg.Claims, ip string) (string, error) {
-	key, err := generateSessionKey()
+func (s *AgentService) GenerateEnrollmentToken(ctx context.Context, actor *jwtpkg.Claims, ip string) (string, error) {
+	token, err := generateSessionKey()
 	if err != nil {
 		return "", err
 	}
 
-	if err := s.repo.CreateEnrollmentKey(ctx, key); err != nil {
+	if err := s.repo.CreateEnrollmentToken(ctx, token); err != nil {
 		return "", err
 	}
 
 	s.auditSvc.Log(ctx, &auditDomain.AuditLog{
 		UserID:         &actor.UserID,
 		UserIdentifier: actor.Username,
-		Action:         auditDomain.ActionGenerateEnrollmentKey,
-		ObjectType:     strPtr(auditDomain.ObjectTypeEnrollmentKey),
+		Action:         auditDomain.ActionGenerateEnrollmentToken,
+		ObjectType:     strPtr(auditDomain.ObjectTypeEnrollmentToken),
 		Metadata: map[string]interface{}{
 			"ip_address": ip,
 		},
 	})
 
-	return key, nil
+	return token, nil
 }
 
 func (s *AgentService) GetByID(ctx context.Context, id uuid.UUID) (*domain.Agent, error) {

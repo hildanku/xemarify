@@ -23,17 +23,17 @@ func NewPgAgentRepository(db *pgxpool.Pool) AgentRepository {
 	return &pgAgentRepository{db: db}
 }
 
-func (r *pgAgentRepository) CreateEnrollmentKey(ctx context.Context, key string) error {
+func (r *pgAgentRepository) CreateEnrollmentToken(ctx context.Context, token string) error {
 	const q = `
 		INSERT INTO agent_keys (id, key, status, created_at)
 		VALUES ($1, $2, 'unused', NOW())
 	`
 
-	_, err := r.db.Exec(ctx, q, uuid.New(), key)
+	_, err := r.db.Exec(ctx, q, uuid.New(), token)
 	return err
 }
 
-func (r *pgAgentRepository) CreateWithEnrollmentKey(ctx context.Context, enrollmentKey string, a *domain.Agent) error {
+func (r *pgAgentRepository) CreateWithEnrollmentToken(ctx context.Context, enrollmentToken string, a *domain.Agent) error {
 	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return err
@@ -50,9 +50,9 @@ func (r *pgAgentRepository) CreateWithEnrollmentKey(ctx context.Context, enrollm
 	`
 
 	var enrollmentID uuid.UUID
-	if err := tx.QueryRow(ctx, lockKeyQuery, enrollmentKey).Scan(&enrollmentID); err != nil {
+	if err := tx.QueryRow(ctx, lockKeyQuery, enrollmentToken).Scan(&enrollmentID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrEnrollmentKeyInvalid
+			return ErrEnrollmentTokenInvalid
 		}
 		return err
 	}
@@ -68,7 +68,7 @@ func (r *pgAgentRepository) CreateWithEnrollmentKey(ctx context.Context, enrollm
 		ipAddress = &a.IPAddress
 	}
 
-	if _, err := tx.Exec(ctx, insertAgentQuery, a.ID, a.Name, a.Hostname, a.Key, ipAddress, a.Version, a.Status); err != nil {
+	if _, err := tx.Exec(ctx, insertAgentQuery, a.ID, a.Name, a.Hostname, a.Secret, ipAddress, a.Version, a.Status); err != nil {
 		return err
 	}
 
@@ -91,7 +91,7 @@ func (r *pgAgentRepository) CreateWithEnrollmentKey(ctx context.Context, enrollm
 	return nil
 }
 
-func (r *pgAgentRepository) GetByKey(ctx context.Context, key string) (*domain.Agent, error) {
+func (r *pgAgentRepository) GetBySecret(ctx context.Context, secret string) (*domain.Agent, error) {
 	const q = `
 		SELECT id, name, hostname, key, ip_address::text, version, status, created_at, last_seen_at
 		FROM agents
@@ -99,7 +99,7 @@ func (r *pgAgentRepository) GetByKey(ctx context.Context, key string) (*domain.A
 		LIMIT 1
 	`
 
-	row := r.db.QueryRow(ctx, q, key)
+	row := r.db.QueryRow(ctx, q, secret)
 
 	var a domain.Agent
 	var ipAddress *string
@@ -109,7 +109,7 @@ func (r *pgAgentRepository) GetByKey(ctx context.Context, key string) (*domain.A
 		&a.ID,
 		&a.Name,
 		&a.Hostname,
-		&a.Key,
+		&a.Secret,
 		&ipAddress,
 		&a.Version,
 		&a.Status,
@@ -128,8 +128,8 @@ func (r *pgAgentRepository) GetByKey(ctx context.Context, key string) (*domain.A
 	}
 	a.LastSeenAt = lastSeenAt
 
-	// Timing-safe key comparison to prevent timing attacks.
-	if subtle.ConstantTimeCompare([]byte(a.Key), []byte(key)) != 1 {
+	// Timing-safe secret comparison to prevent timing attacks.
+	if subtle.ConstantTimeCompare([]byte(a.Secret), []byte(secret)) != 1 {
 		return nil, nil
 	}
 
@@ -165,7 +165,7 @@ func (r *pgAgentRepository) GetByID(ctx context.Context, agentId uuid.UUID) (*do
 		&a.ID,
 		&a.Name,
 		&a.Hostname,
-		&a.Key,
+		&a.Secret,
 		&ipAddress,
 		&a.Version,
 		&a.Status,
@@ -256,7 +256,7 @@ func (r *pgAgentRepository) List(ctx context.Context, filter ListFilter) ([]*dom
 			&a.ID,
 			&a.Name,
 			&a.Hostname,
-			&a.Key,
+			&a.Secret,
 			&ipAddress,
 			&a.Version,
 			&a.Status,
@@ -290,7 +290,7 @@ func (r *pgAgentRepository) Create(ctx context.Context, a *domain.Agent) error {
 	if a.IPAddress != "" {
 		ipAddress = &a.IPAddress
 	}
-	_, err := r.db.Exec(ctx, q, a.ID, a.Name, a.Hostname, a.Key, ipAddress, a.Version, a.Status)
+	_, err := r.db.Exec(ctx, q, a.ID, a.Name, a.Hostname, a.Secret, ipAddress, a.Version, a.Status)
 	return err
 }
 

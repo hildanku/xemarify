@@ -17,7 +17,7 @@ export interface CreateAgentRequest {
 	ip_address?: string
 	version?: string
 	status?: AgentStatus
-	key?: string
+	agent_secret?: string
 }
 
 export interface UpdateAgentRequest {

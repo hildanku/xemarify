@@ -9,7 +9,7 @@ import (
 	"github.com/hildanku/xemarify/pkg/query"
 )
 
-var ErrEnrollmentKeyInvalid = errors.New("enrollment key is invalid or already used")
+var ErrEnrollmentTokenInvalid = errors.New("enrollment token is invalid or already used")
 
 // ListFilter holds all filter and pagination options for listing agents.
 // It embeds query.BaseFilter for the shared sort/pagination contract, and can be
@@ -23,14 +23,14 @@ type ListFilter struct {
 
 // AgentRepository defines the persistence contract for the agent module.
 type AgentRepository interface {
-	// CreateEnrollmentKey persists a new one-time enrollment key.
-	CreateEnrollmentKey(ctx context.Context, key string) error
+	// CreateEnrollmentToken persists a new one-time enrollment token.
+	CreateEnrollmentToken(ctx context.Context, token string) error
 
-	// CreateWithEnrollmentKey creates an agent and marks enrollment key as used atomically.
-	CreateWithEnrollmentKey(ctx context.Context, enrollmentKey string, agent *domain.Agent) error
+	// CreateWithEnrollmentToken creates an agent and marks the enrollment token as used atomically.
+	CreateWithEnrollmentToken(ctx context.Context, enrollmentToken string, agent *domain.Agent) error
 
-	// GetByKey looks up an agent by its secret key. Returns nil if not found.
-	GetByKey(ctx context.Context, key string) (*domain.Agent, error)
+	// GetBySecret looks up an agent by its runtime secret. Returns nil if not found.
+	GetBySecret(ctx context.Context, secret string) (*domain.Agent, error)
 
 	// UpdateLastSeen updates last_seen_at and sets status to ONLINE.
 	UpdateLastSeen(ctx context.Context, agentID uuid.UUID) error

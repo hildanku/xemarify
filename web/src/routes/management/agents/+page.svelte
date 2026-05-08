@@ -170,8 +170,8 @@
 			</p>
 		</div>
 		<div class="flex items-center gap-2">
-			<Button variant="outline" href="/management/agent-keys">
-				Agent Keys
+			<Button variant="outline" href="/management/enrollment-tokens">
+				Enrollment Tokens
 			</Button>
 			<AgentCreateDialog
 				onCreate={handleCreate}

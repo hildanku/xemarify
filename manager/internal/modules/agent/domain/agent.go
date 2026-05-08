@@ -18,7 +18,7 @@ type Agent struct {
 	ID         uuid.UUID
 	Name       string
 	Hostname   string
-	Key        string
+	Secret     string
 	IPAddress  string
 	Version    string
 	Status     AgentStatus

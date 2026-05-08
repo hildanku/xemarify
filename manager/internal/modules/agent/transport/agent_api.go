@@ -11,8 +11,8 @@ type RegisterRequest struct {
 
 // RegisterResponse contains the persistent agent identity returned after enrollment.
 type RegisterResponse struct {
-	AgentID string `json:"agent_id"`
-	Key     string `json:"key"`
+	AgentID     string `json:"agent_id"`
+	AgentSecret string `json:"agent_secret"`
 }
 
 // HeartbeatRequest is sent periodically by authenticated agents.
@@ -22,7 +22,7 @@ type HeartbeatRequest struct {
 	Uptime     int64  `json:"uptime"`
 }
 
-// CreateAgentKeyResponse is returned when admin generates one-time enrollment key.
-type CreateAgentKeyResponse struct {
-	Key string `json:"key"`
+// CreateEnrollmentTokenResponse is returned when admin generates a one-time enrollment token.
+type CreateEnrollmentTokenResponse struct {
+	EnrollmentToken string `json:"enrollment_token"`
 }
