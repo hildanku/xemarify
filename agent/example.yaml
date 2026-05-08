@@ -2,14 +2,18 @@ server:
   endpoint: "http://localhost:8089"
   insecure: true
 
+enrollment_token: ""
+
 disk_buffer:
   path: "/var/lib/xemarify-agent/spool/events.log"
   max_bytes: 524288000
 
 agent:
-  id: "ID AGENT"
-  key: "KEY AGENT from agents table"
-  agent_key: ""
+  id: ""
+  agent_secret: ""
+  name: ""
+  hostname: ""
+  ip_address: ""
 
 syslog:
   listen: ":5514"

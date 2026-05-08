@@ -25,7 +25,7 @@ func NewHTTPClient(insecure bool) *http.Client {
 	}
 }
 
-func Register(client *http.Client, endpoint, enrollmentKey string, payload model.RegisterRequest) (*model.RegisterResponse, error) {
+func Register(client *http.Client, endpoint, enrollmentToken string, payload model.RegisterRequest) (*model.RegisterResponse, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
@@ -37,7 +37,7 @@ func Register(client *http.Client, endpoint, enrollmentKey string, payload model
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set(model.AgentKeyHeader, enrollmentKey)
+	req.Header.Set(model.EnrollmentTokenHeader, enrollmentToken)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -55,14 +55,14 @@ func Register(client *http.Client, endpoint, enrollmentKey string, payload model
 		return nil, err
 	}
 
-	if strings.TrimSpace(out.AgentID) == "" || strings.TrimSpace(out.Key) == "" {
+	if strings.TrimSpace(out.AgentID) == "" || strings.TrimSpace(out.AgentSecret) == "" {
 		return nil, fmt.Errorf("register returned empty credentials")
 	}
 
 	return &out, nil
 }
 
-func PostJSON(ctx context.Context, client *http.Client, url string, key string, payload any, expectedStatus int) error {
+func PostJSON(ctx context.Context, client *http.Client, url string, agentSecret string, payload any, expectedStatus int) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return err
@@ -73,7 +73,7 @@ func PostJSON(ctx context.Context, client *http.Client, url string, key string, 
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set(model.AgentKeyHeader, key)
+	req.Header.Set(model.AgentSecretHeader, agentSecret)
 
 	resp, err := client.Do(req)
 	if err != nil {

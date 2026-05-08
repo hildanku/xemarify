@@ -40,20 +40,30 @@ func main() {
 	}
 
 	client := apiclient.NewHTTPClient(cfg.Server.Insecure)
-	hostname, _ := os.Hostname()
-	if hostname == "" {
-		hostname = "unknown-host"
+	localHostname, _ := os.Hostname()
+	if localHostname == "" {
+		localHostname = "unknown-host"
+	}
+
+	agentHostname := strings.TrimSpace(cfg.Agent.Hostname)
+	if agentHostname == "" {
+		agentHostname = localHostname
+	}
+
+	agentName := strings.TrimSpace(cfg.Agent.Name)
+	if agentName == "" {
+		agentName = agentHostname
 	}
 
 	if strings.TrimSpace(cfg.Agent.ID) == "" {
-		if strings.TrimSpace(cfg.Agent.AgentKey) == "" {
-			log.Fatalf("agent.agent_key is required for first registration in %s", configPath)
+		if strings.TrimSpace(cfg.EnrollmentToken) == "" {
+			log.Fatalf("enrollment_token is required for first registration in %s", configPath)
 		}
 
-		resp, err := apiclient.Register(client, cfg.Server.Endpoint, cfg.Agent.AgentKey, model.RegisterRequest{
-			Name:     hostname,
-			Hostname: hostname,
-			IP:       "",
+		resp, err := apiclient.Register(client, cfg.Server.Endpoint, cfg.EnrollmentToken, model.RegisterRequest{
+			Name:     agentName,
+			Hostname: agentHostname,
+			IP:       strings.TrimSpace(cfg.Agent.IPAddress),
 			OS:       runtime.GOOS,
 			Version:  model.AgentVersion,
 		})
@@ -62,8 +72,8 @@ func main() {
 		}
 
 		cfg.Agent.ID = resp.AgentID
-		cfg.Agent.Key = resp.Key
-		cfg.Agent.AgentKey = ""
+		cfg.Agent.AgentSecret = resp.AgentSecret
+		cfg.EnrollmentToken = ""
 
 		if err := config.Save(configPath, cfg); err != nil {
 			log.Fatalf("failed to persist registration state: %v", err)
@@ -71,8 +81,8 @@ func main() {
 		log.Printf("agent registered successfully: agent_id=%s", cfg.Agent.ID)
 	}
 
-	if strings.TrimSpace(cfg.Agent.Key) == "" {
-		log.Fatalf("agent.key is required after registration")
+	if strings.TrimSpace(cfg.Agent.AgentSecret) == "" {
+		log.Fatalf("agent.agent_secret is required after registration")
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -91,16 +101,16 @@ func main() {
 	}
 
 	go pipeline.RunIngestor(ctx, eventCh, queue)
-	go pipeline.RunSender(ctx, client, cfg.Server.Endpoint, cfg.Agent.ID, cfg.Agent.Key, queue, retryPolicy, batchSize, batchFlushEvery, &eventsDelivered)
-	go pipeline.RunHeartbeat(ctx, client, cfg.Server.Endpoint, cfg.Agent.ID, cfg.Agent.Key, 60*time.Second, &eventsDelivered, startedAt)
-	go collector.RunSyslogUDP(ctx, cfg.Syslog.Listen, hostname, eventCh)
+	go pipeline.RunSender(ctx, client, cfg.Server.Endpoint, cfg.Agent.ID, cfg.Agent.AgentSecret, queue, retryPolicy, batchSize, batchFlushEvery, &eventsDelivered)
+	go pipeline.RunHeartbeat(ctx, client, cfg.Server.Endpoint, cfg.Agent.ID, cfg.Agent.AgentSecret, 60*time.Second, &eventsDelivered, startedAt)
+	go collector.RunSyslogUDP(ctx, cfg.Syslog.Listen, agentHostname, eventCh)
 
 	if cfg.FileLog.Enabled && len(cfg.FileLog.Paths) > 0 {
-		go collector.RunFileLog(ctx, cfg.FileLog.Paths, hostname, eventCh, cfg.FileLog.PollInterval)
+		go collector.RunFileLog(ctx, cfg.FileLog.Paths, agentHostname, eventCh, cfg.FileLog.PollInterval)
 	}
 
 	if cfg.Inventory.Enabled {
-		go collector.RunInventory(ctx, hostname, eventCh, cfg.Inventory.Interval)
+		go collector.RunInventory(ctx, agentHostname, eventCh, cfg.Inventory.Interval)
 	}
 
 	log.Printf(

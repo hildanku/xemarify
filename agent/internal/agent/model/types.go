@@ -3,8 +3,9 @@ package model
 import "time"
 
 const (
-	AgentKeyHeader = "X-Agent-Key"
-	AgentVersion   = "mvp-v1"
+	EnrollmentTokenHeader = "X-Enrollment-Token"
+	AgentSecretHeader     = "X-Agent-Secret"
+	AgentVersion          = "mvp-v1"
 )
 
 type RegisterRequest struct {
@@ -16,8 +17,8 @@ type RegisterRequest struct {
 }
 
 type RegisterResponse struct {
-	AgentID string `json:"agent_id"`
-	Key     string `json:"key"`
+	AgentID     string `json:"agent_id"`
+	AgentSecret string `json:"agent_secret"`
 }
 
 type HeartbeatRequest struct {
