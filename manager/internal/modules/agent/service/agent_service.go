@@ -147,7 +147,7 @@ func (s *AgentService) Register(ctx context.Context, input RegisterInput) (*Regi
 		Hostname:  hostname,
 		IPAddress: ipAddress,
 		Version:   version,
-		Status:    domain.AgentStatusOffline,
+		Status:    domain.AgentStatusOnline,
 		Key:       sessionKey,
 	}
 
