@@ -170,6 +170,9 @@
 			</p>
 		</div>
 		<div class="flex items-center gap-2">
+			<Button variant="outline" href="/management/agent-onboarding">
+				Agent Onboarding
+			</Button>
 			<Button variant="outline" href="/management/enrollment-tokens">
 				Enrollment Tokens
 			</Button>
