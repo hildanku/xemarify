@@ -27,7 +27,7 @@ func RunSender(
 	client *http.Client,
 	endpoint string,
 	agentID string,
-	sessionKey string,
+	agentSecret string,
 	queue EventQueue,
 	retry RetryPolicy,
 	batchSize int,
@@ -57,7 +57,7 @@ func RunSender(
 				Events:  events,
 			}
 
-			if err := apiclient.PostJSON(ctx, client, apiclient.JoinURL(endpoint, "/api/v1/events"), sessionKey, payload, http.StatusAccepted); err != nil {
+			if err := apiclient.PostJSON(ctx, client, apiclient.JoinURL(endpoint, "/api/v1/events"), agentSecret, payload, http.StatusAccepted); err != nil {
 				queue.Nack(ids, now, retry)
 				log.Printf("event send failed (%d events, queue=%d): %v", len(items), queue.Len(), err)
 				return
@@ -89,7 +89,7 @@ func RunHeartbeat(
 	client *http.Client,
 	endpoint string,
 	agentID string,
-	sessionKey string,
+	agentSecret string,
 	interval time.Duration,
 	eventsDelivered *atomic.Int64,
 	startedAt time.Time,
@@ -103,7 +103,7 @@ func RunHeartbeat(
 			EventsSent: eventsDelivered.Load(),
 			Uptime:     int64(time.Since(startedAt).Seconds()),
 		}
-		if err := apiclient.PostJSON(ctx, client, apiclient.JoinURL(endpoint, "/api/v1/agents/heartbeat"), sessionKey, payload, http.StatusOK); err != nil {
+		if err := apiclient.PostJSON(ctx, client, apiclient.JoinURL(endpoint, "/api/v1/agents/heartbeat"), agentSecret, payload, http.StatusOK); err != nil {
 			log.Printf("heartbeat failed: %v", err)
 		}
 	}

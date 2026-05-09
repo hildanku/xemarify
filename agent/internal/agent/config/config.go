@@ -13,14 +13,17 @@ type Config struct {
 		Endpoint string `yaml:"endpoint"`
 		Insecure bool   `yaml:"insecure"`
 	} `yaml:"server"`
-	DiskBuffer struct {
+	EnrollmentToken string `yaml:"enrollment_token"`
+	DiskBuffer      struct {
 		Path     string `yaml:"path"`
 		MaxBytes int64  `yaml:"max_bytes"`
 	} `yaml:"disk_buffer"`
 	Agent struct {
-		ID       string `yaml:"id"`
-		Key      string `yaml:"key"`
-		AgentKey string `yaml:"agent_key"`
+		ID          string `yaml:"id"`
+		AgentSecret string `yaml:"agent_secret"`
+		Name        string `yaml:"name"`
+		Hostname    string `yaml:"hostname"`
+		IPAddress   string `yaml:"ip_address"`
 	} `yaml:"agent"`
 	FileLog struct {
 		Enabled      bool          `yaml:"enabled"`

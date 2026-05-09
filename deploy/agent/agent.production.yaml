@@ -1,8 +1,8 @@
 server:
-  endpoint: "http://localhost:8089"
-  insecure: true
+  endpoint: "__MANAGER_ENDPOINT__"
+  insecure: __INSECURE_TLS__
 
-enrollment_token: ""
+enrollment_token: "__ENROLLMENT_TOKEN__"
 
 disk_buffer:
   path: "/var/lib/xemarify-agent/spool/events.log"
@@ -22,10 +22,10 @@ filelog:
   enabled: true
   poll_interval: 5s
   paths:
+    - /var/log/syslog
+    - /var/log/auth.log
     - /var/log/nginx/access.log
     - /var/log/nginx/error.log
-    - /var/log/apache2/access.log
-    - /var/log/apache2/error.log
 
 inventory:
   enabled: true

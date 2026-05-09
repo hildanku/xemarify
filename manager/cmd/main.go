@@ -101,18 +101,15 @@ func main() {
 	router := gin.New()
 	router.Use(gin.Recovery())
 
-	// CORS: allow everything in development (LOG_LEVEL=debug), restrict in production
-	if cfg.LogLevel == "debug" {
-		router.Use(cors.New(cors.Config{
-			AllowAllOrigins:  true,
-			AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-			AllowHeaders:     []string{"*"},
-			ExposeHeaders:    []string{"Content-Length"},
-			AllowCredentials: false,
-		}))
-	} else {
-		router.Use(cors.Default())
-	}
+	// The web dashboard is served from a separate origin in production, so CORS
+	// must allow authenticated browser preflight requests as well.
+	router.Use(cors.New(cors.Config{
+		AllowAllOrigins:  true,
+		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-Requested-With", "X-Agent-Secret", "X-Enrollment-Token"},
+		ExposeHeaders:    []string{"Content-Length"},
+		AllowCredentials: false,
+	}))
 
 	// Public endpoints
 	router.GET("/health", func(c *gin.Context) {
