@@ -2,7 +2,7 @@
 	import { createMutation } from '@tanstack/svelte-query'
 	import { toast } from 'svelte-sonner'
 	import { clientFetch } from '$lib/client'
-	import { V1_BASE_URL } from '$lib/constant'
+	import { BASE_URL, V1_BASE_URL } from '$lib/constant'
 	import { Button } from '$lib/components/ui/button/index.js'
 	import { Input } from '$lib/components/ui/input/index.js'
 	import * as Card from '$lib/components/ui/card/index.js'
@@ -15,6 +15,11 @@
 	let generatedToken = $state('')
 	let generatedAt = $state<Date | null>(null)
 	let copied = $state(false)
+
+	const onboardingHref = $derived.by(() => {
+		const token = encodeURIComponent(generatedToken || 'paste-generated-token-here')
+		return `/management/agent-onboarding?token=${token}&endpoint=${encodeURIComponent(BASE_URL)}`
+	})
 
 	const generateTokenMutation = createMutation(() => ({
 		mutationFn: () =>
@@ -48,12 +53,15 @@
 	}
 </script>
 
-<div class="flex flex-1 flex-col gap-4 p-4 max-w-full">
-	<div>
-		<h1 class="text-3xl font-bold tracking-tight">Enrollment Tokens</h1>
-		<p class="text-muted-foreground">
-			Generate one-time bootstrap credentials for new agents
-		</p>
+	<div class="flex flex-1 flex-col gap-4 p-4 max-w-full">
+	<div class="flex flex-wrap items-start justify-between gap-3">
+		<div>
+			<h1 class="text-3xl font-bold tracking-tight">Enrollment Tokens</h1>
+			<p class="text-muted-foreground">
+				Generate one-time bootstrap credentials for new agents
+			</p>
+		</div>
+		<Button variant="outline" href={onboardingHref}>Open Onboarding Guide</Button>
 	</div>
 
 	<Card.Root>
@@ -101,10 +109,15 @@
 			</Card.Description>
 		</Card.Header>
 		<Card.Content>
-			<pre class="rounded-md border bg-muted p-3 text-xs overflow-x-auto"><code>manager_url: "https://manager.example.com"
+			<pre class="rounded-md border bg-muted p-3 text-xs overflow-x-auto"><code>server:
+  endpoint: "{BASE_URL}"
+  insecure: false
+
 enrollment_token: "{generatedToken || 'paste-generated-token-here'}"
 
 agent:
+  id: ""
+  agent_secret: ""
   name: "web-01"
   hostname: "web-01"
   ip_address: "10.0.0.12"</code></pre>

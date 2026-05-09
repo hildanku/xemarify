@@ -73,7 +73,7 @@
     const navSecondary = [
         {
             title: 'Documentation',
-            url: '#',
+            url: '/management/agent-onboarding',
             icon: BookOpenIcon,
         },
         {

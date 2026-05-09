@@ -7,6 +7,7 @@ const MANAGER_ONLY_PREFIXES = [
 	'/management/users',
 	'/management/agents',
 	'/management/enrollment-tokens',
+	'/management/agent-onboarding',
 	'/management/rules',
 ] as const
 
