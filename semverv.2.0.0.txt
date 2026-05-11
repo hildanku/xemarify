@@ -1,0 +1,417 @@
+## Core Version Format
+
+Use version format:
+
+```txt
+MAJOR.MINOR.PATCH
+```
+
+Example:
+
+```txt
+1.4.2
+```
+
+Where:
+
+* `MAJOR` = breaking changes
+* `MINOR` = backward compatible features
+* `PATCH` = backward compatible fixes
+
+---
+
+# Version Increment Rules
+
+## PATCH Increment
+
+Increment PATCH when:
+
+* fixing bugs
+* improving performance internally
+* refactoring without changing public behavior
+* fixing security issues without changing API contracts
+* fixing UI bugs without affecting workflows
+
+Examples:
+
+```txt
+1.2.3 -> 1.2.4
+```
+
+Typical cases:
+
+* null pointer fix
+* SQL query fix
+* typo correction
+* logging improvement
+* retry handling fix
+
+PATCH changes MUST remain backward compatible.
+
+---
+
+## MINOR Increment
+
+Increment MINOR when:
+
+* adding new features
+* adding new API endpoints
+* adding optional parameters
+* introducing new functionality without breaking existing integrations
+* deprecating existing features (without removing them)
+
+Examples:
+
+```txt
+1.2.4 -> 1.3.0
+```
+
+Typical cases:
+
+* new dashboard page
+* export CSV feature
+* additional REST endpoint
+* optional configuration support
+* adding WebSocket support
+
+Rules:
+
+* existing user workflows MUST continue working
+* old API contracts MUST remain functional
+* PATCH resets to 0
+
+---
+
+## MAJOR Increment
+
+Increment MAJOR when:
+
+* introducing breaking changes
+* removing public APIs
+* changing response structures incompatibly
+* renaming required fields
+* changing authentication flow incompatibly
+* removing deprecated functionality
+* changing database/schema behavior requiring migration
+
+Examples:
+
+```txt
+1.3.0 -> 2.0.0
+```
+
+Typical cases:
+
+* endpoint removal
+* request/response schema changes
+* incompatible config format
+* auth middleware rewrite
+* CLI argument changes
+
+Rules:
+
+* backward compatibility is broken
+* MINOR resets to 0
+* PATCH resets to 0
+
+---
+
+# Backward Compatibility
+
+A change is backward compatible if:
+
+* existing clients continue functioning
+* previous integrations do not break
+* old workflows still work without modification
+
+Examples:
+
+* adding optional fields = compatible
+* adding new endpoints = compatible
+* adding non-required configs = compatible
+
+Examples of breaking changes:
+
+* removing fields
+* renaming APIs
+* changing required parameter formats
+* changing return types incompatibly
+
+---
+
+# Public API Definition
+
+Public API includes:
+
+* REST/GraphQL endpoints
+* exported SDK functions
+* CLI interfaces
+* configuration schema
+* webhook payloads
+* database contracts exposed externally
+* plugin interfaces
+
+Internal refactors do NOT necessarily require MAJOR changes unless public behavior changes.
+
+---
+
+# Pre-release Versions
+
+Use pre-release suffixes for unstable versions.
+
+Examples:
+
+```txt
+1.0.0-alpha
+1.0.0-beta
+1.0.0-rc.1
+```
+
+Definitions:
+
+* alpha = experimental
+* beta = feature complete but testing
+* rc = release candidate, near production-ready
+
+Pre-release versions have lower precedence than stable releases.
+
+---
+
+# Build Metadata
+
+Build metadata may be appended using `+`.
+
+Examples:
+
+```txt
+1.0.0+20260509
+1.0.0+commit.a1b2c3
+```
+
+Build metadata:
+
+* MUST NOT affect version precedence
+* SHOULD be used for CI/CD tracking or commit references
+
+---
+
+# Initial Development Rules
+
+Versions below `1.0.0` indicate unstable development.
+
+Examples:
+
+```txt
+0.1.0
+0.5.2
+```
+
+Rules:
+
+* APIs may change freely
+* backward compatibility is not guaranteed
+* rapid iteration is acceptable
+
+---
+
+# Deprecation Rules
+
+When functionality will be removed:
+
+1. mark it as deprecated first
+2. keep it functional temporarily
+3. remove it only in a future MAJOR release
+
+Example flow:
+
+```txt
+1.4.0 -> feature deprecated
+2.0.0 -> feature removed
+```
+
+---
+
+# Changelog Categories
+
+Use these categories when generating changelogs:
+
+```md
+## Added
+## Changed
+## Deprecated
+## Removed
+## Fixed
+## Security
+```
+
+---
+
+# Dependency Compatibility Philosophy
+
+Compatible upgrades:
+
+* PATCH upgrades are assumed safe
+* MINOR upgrades are assumed safe
+* MAJOR upgrades may require migration
+
+Example:
+
+```txt
+>=1.4.0 <2.0.0
+```
+
+Meaning:
+
+* allow patch/minor upgrades
+* disallow breaking upgrades
+
+---
+
+# AI Decision Heuristics
+
+When determining version bumps:
+
+## Choose PATCH if:
+
+* no public API change
+* no workflow change
+* bug/security/internal fix only
+
+## Choose MINOR if:
+
+* functionality added
+* old integrations still work
+* compatibility maintained
+
+## Choose MAJOR if:
+
+* old clients may fail
+* migration required
+* public contract changed incompatibly
+
+When uncertain:
+
+* prioritize compatibility analysis
+* evaluate impact on existing users
+* consider whether existing integrations require modification
+
+---
+
+# Examples
+
+## Example 1 — PATCH
+
+Before:
+
+```json
+{
+  "status": "ok"
+}
+```
+
+After:
+
+* fixed timeout handling internally
+
+Result:
+
+```txt
+1.2.3 -> 1.2.4
+```
+
+---
+
+## Example 2 — MINOR
+
+Before:
+
+```json
+{
+  "name": "Hildan"
+}
+```
+
+After:
+
+```json
+{
+  "name": "Hildan",
+  "avatar": "..."
+}
+```
+
+Old clients still work.
+
+Result:
+
+```txt
+1.2.4 -> 1.3.0
+```
+
+---
+
+## Example 3 — MAJOR
+
+Before:
+
+```json
+{
+  "name": "Hildan"
+}
+```
+
+After:
+
+```json
+{
+  "full_name": "Hildan"
+}
+```
+
+Old clients break.
+
+Result:
+
+```txt
+1.3.0 -> 2.0.0
+```
+
+---
+
+# Semantic Commit Mapping
+
+Suggested commit prefixes:
+
+```txt
+feat:
+fix:
+refactor:
+perf:
+docs:
+test:
+build:
+ci:
+chore:
+breaking:
+```
+
+Typical mappings:
+
+* `fix:` -> PATCH
+* `feat:` -> MINOR
+* `breaking:` -> MAJOR
+
+---
+
+# Important Principle
+
+Version numbers are communication tools.
+
+They MUST clearly signal:
+
+* compatibility expectations
+* migration risk
+* scope of changes
+* stability level
+
+The goal of Semantic Versioning is to reduce dependency conflicts, improve upgrade safety, and make software evolution predictable.
