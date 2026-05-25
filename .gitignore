@@ -2,3 +2,19 @@ node_modules
 .env
 .svelte-kit
 llm-docs
+skripsi-docs/
+MIGRATIONS.md
+insomnia.json
+agent-dummy/
+## batas
+agents
+build
+dist
+.env.prod
+catatan_after_deployment.txt
+## binary
+xemarify-agent
+xemarify-agent_1.0.0_linux_amd64.tar.gz
+
+## catatan
+notes.txt
