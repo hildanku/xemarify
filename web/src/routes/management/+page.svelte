@@ -99,7 +99,7 @@
 		queryKey: ['dashboard', 'agents-overview'],
 		queryFn: () =>
 			clientFetch<ApiResponseWithMetadata<Agent[]>>(
-				`${V1_BASE_URL}/agents?limit=200&offset=0&sort_by=created_at&order=desc`,
+				`${V1_BASE_URL}/agents?limit=100&offset=0&sort_by=created_at&order=desc`,
 				{ method: 'GET' },
 			),
 		...realtimeQueryOptions(),
