@@ -6,7 +6,7 @@ set -euo pipefail
 # Tested on: Ubuntu 22.04 LTS
 # Usage:
 #   sudo ./install-manager.sh
-#   sudo ./install-manager.sh --manager-version v1.0.1-beta --web-version v1.0.0-beta
+#   sudo ./install-manager.sh --manager-version v1.0.2-beta --web-version v1.0.1-beta
 #
 # Prerequisites:
 #   - docker login ghcr.io
@@ -65,11 +65,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# 1. Check root
-if [[ "${EUID}" -ne 0 ]]; then
-  err "Please run as root (use sudo)."
-  exit 1
-fi
+require_root() {
+  if [[ "${EUID}" -ne 0 ]]; then
+    err "Please run as root (use sudo)."
+    exit 1
+  fi
+}
 
 
 # 2. Install Docker if not present
@@ -84,18 +85,17 @@ install_docker() {
   apt-get install -y -qq ca-certificates curl gnupg lsb-release
 
   install -m 0755 -d /etc/apt/keyrings
-  curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
-    gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-  chmod a+r /etc/apt/keyrings/docker.gpg
+  curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  chmod a+r /etc/apt/keyrings/docker.asc
 
-    tee /etc/apt/sources.list.d/docker.sources <<EOF
-    Types: deb
-    URIs: https://download.docker.com/linux/ubuntu
-    Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
-    Components: stable
-    Architectures: $(dpkg --print-architecture)
-    Signed-By: /etc/apt/keyrings/docker.asc
-    EOF
+  tee /etc/apt/sources.list.d/docker.sources <<EOF
+Types: deb
+URIs: https://download.docker.com/linux/ubuntu
+Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
+Components: stable
+Architectures: $(dpkg --print-architecture)
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
 
   apt-get update -qq
   apt-get install -y -qq  docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
@@ -405,6 +405,7 @@ main() {
   log "Target:  ${INSTALL_DIR}"
   echo ""
 
+  require_root
   install_docker
   check_ghcr_login
   generate_env
@@ -413,4 +414,6 @@ main() {
   start_stack
 }
 
-main
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main
+fi
