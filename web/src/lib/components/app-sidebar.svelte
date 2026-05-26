@@ -8,6 +8,7 @@
     import ServerIcon from '@lucide/svelte/icons/server'
     import BookOpenIcon from '@lucide/svelte/icons/book-open'
     import SettingsIcon from '@lucide/svelte/icons/settings'
+    import UserIcon from '@lucide/svelte/icons/user'
     import ShieldCheckIcon from '@lucide/svelte/icons/shield-check'
     import { auth } from '$lib/auth/session'
     import NavMain from './nav-main.svelte'
@@ -63,6 +64,11 @@
                     title: 'Enrollment Tokens',
                     url: '/management/enrollment-tokens',
                     icon: ServerIcon,
+                },
+                {
+                    title: 'Users',
+                    url: '/management/users',
+                    icon: UserIcon,
                 },
             )
         }

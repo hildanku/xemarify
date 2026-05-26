@@ -23,13 +23,13 @@ func NewPgAgentRepository(db *pgxpool.Pool) AgentRepository {
 	return &pgAgentRepository{db: db}
 }
 
-func (r *pgAgentRepository) CreateEnrollmentToken(ctx context.Context, token string) error {
+func (r *pgAgentRepository) CreateEnrollmentToken(ctx context.Context, id uuid.UUID, token string) error {
 	const q = `
 		INSERT INTO agent_keys (id, key, status, created_at)
 		VALUES ($1, $2, 'unused', NOW())
 	`
 
-	_, err := r.db.Exec(ctx, q, uuid.New(), token)
+	_, err := r.db.Exec(ctx, q, id, token)
 	return err
 }
 

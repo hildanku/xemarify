@@ -24,7 +24,7 @@ type ListFilter struct {
 // AgentRepository defines the persistence contract for the agent module.
 type AgentRepository interface {
 	// CreateEnrollmentToken persists a new one-time enrollment token.
-	CreateEnrollmentToken(ctx context.Context, token string) error
+	CreateEnrollmentToken(ctx context.Context, id uuid.UUID, token string) error
 
 	// CreateWithEnrollmentToken creates an agent and marks the enrollment token as used atomically.
 	CreateWithEnrollmentToken(ctx context.Context, enrollmentToken string, agent *domain.Agent) error

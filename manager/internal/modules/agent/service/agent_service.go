@@ -214,7 +214,9 @@ func (s *AgentService) GenerateEnrollmentToken(ctx context.Context, actor *jwtpk
 		return "", err
 	}
 
-	if err := s.repo.CreateEnrollmentToken(ctx, token); err != nil {
+	id := uuid.New()
+
+	if err := s.repo.CreateEnrollmentToken(ctx, id, token); err != nil {
 		return "", err
 	}
 
@@ -223,6 +225,7 @@ func (s *AgentService) GenerateEnrollmentToken(ctx context.Context, actor *jwtpk
 		UserIdentifier: actor.Username,
 		Action:         auditDomain.ActionGenerateEnrollmentToken,
 		ObjectType:     strPtr(auditDomain.ObjectTypeEnrollmentToken),
+		ObjectID:       &id,
 		Metadata: map[string]interface{}{
 			"ip_address": ip,
 		},
