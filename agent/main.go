@@ -110,7 +110,7 @@ func main() {
 	}
 
 	if cfg.Inventory.Enabled {
-		go collector.RunInventory(ctx, agentHostname, eventCh, cfg.Inventory.Interval)
+		go collector.RunInventory(ctx, agentHostname, client, cfg.Server.Endpoint, cfg.Agent.ID, cfg.Agent.AgentSecret, cfg.Inventory.Interval)
 	}
 
 	log.Printf(
