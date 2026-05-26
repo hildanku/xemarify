@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/hildanku/xemarify/internal/infrastructure/metrics"
 	"github.com/hildanku/xemarify/internal/infrastructure/middleware"
+	"github.com/hildanku/xemarify/internal/infrastructure/sse"
 	eventRepo "github.com/hildanku/xemarify/internal/modules/event/repository"
 	"github.com/hildanku/xemarify/internal/modules/event/service"
 	"github.com/hildanku/xemarify/internal/modules/event/transport"
@@ -22,13 +24,14 @@ const maxBodyBytes = 1 << 20 // 1 MB
 // EventHandler handles HTTP requests for the event ingestion endpoint.
 type EventHandler struct {
 	svc     *service.EventService
+	hub     *sse.Hub
 	metrics *metrics.Metrics
 	log     *logrus.Logger
 }
 
 // NewEventHandler creates an EventHandler with its dependencies.
-func NewEventHandler(svc *service.EventService, m *metrics.Metrics, log *logrus.Logger) *EventHandler {
-	return &EventHandler{svc: svc, metrics: m, log: log}
+func NewEventHandler(svc *service.EventService, hub *sse.Hub, m *metrics.Metrics, log *logrus.Logger) *EventHandler {
+	return &EventHandler{svc: svc, hub: hub, metrics: m, log: log}
 }
 
 // Register wires the handler routes onto the given router group.
@@ -41,6 +44,11 @@ func (h *EventHandler) Register(rg *gin.RouterGroup) {
 func (h *EventHandler) RegisterManager(rg *gin.RouterGroup) {
 	rg.GET("", h.List)
 	rg.GET("/:id", h.GetByID)
+}
+
+// RegisterStream wires the SSE stream endpoint onto a group with query-param auth.
+func (h *EventHandler) RegisterStream(rg *gin.RouterGroup) {
+	rg.GET("/stream", h.Stream)
 }
 
 // Ingest handles POST /api/v1/events.
@@ -179,4 +187,63 @@ func (h *EventHandler) GetByID(c *gin.Context) {
 	}
 
 	response.Write(c, http.StatusOK, "event retrieved", transport.ToEventDetailResponse(event))
+}
+
+// Stream handles GET /api/v1/events/stream (SSE endpoint).
+// Clients connect and receive real-time event notifications as they are ingested.
+// A heartbeat comment is sent every 30 seconds to keep the connection alive.
+func (h *EventHandler) Stream(c *gin.Context) {
+	// Set SSE headers.
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no") // Disable nginx buffering
+
+	// Disable the server's WriteTimeout for this long-lived connection.
+	rc := http.NewResponseController(c.Writer)
+	_ = rc.SetWriteDeadline(time.Time{})
+
+	// Write status and flush headers immediately so the client sees the connection open.
+	c.Writer.WriteHeader(http.StatusOK)
+	c.Writer.Flush()
+
+	// Register this client with the hub.
+	clientID := fmt.Sprintf("sse-%s", uuid.New().String()[:8])
+	client := h.hub.Register(clientID)
+	defer h.hub.Unregister(client)
+
+	h.log.WithField("client_id", clientID).Debug("SSE client connected")
+
+	// Heartbeat ticker to keep connection alive through proxies.
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	clientGone := c.Request.Context().Done()
+
+	for {
+		select {
+		case <-clientGone:
+			h.log.WithField("client_id", clientID).Debug("SSE client disconnected")
+			return
+
+		case msg, ok := <-client.Events:
+			if !ok {
+				// Hub closed the channel (shutdown).
+				return
+			}
+			_, err := c.Writer.Write(msg)
+			if err != nil {
+				return
+			}
+			c.Writer.Flush()
+
+		case <-ticker.C:
+			// Send heartbeat comment to keep connection alive.
+			_, err := c.Writer.Write([]byte(": heartbeat\n\n"))
+			if err != nil {
+				return
+			}
+			c.Writer.Flush()
+		}
+	}
 }

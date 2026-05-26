@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { resolve } from '$app/paths'
 	import { page } from '$app/stores'
-	import { createQuery } from '@tanstack/svelte-query'
+	import { createQuery, useQueryClient } from '@tanstack/svelte-query'
 	import { clientFetch, type ApiResponse, type ApiResponseWithMetadata } from '$lib/client'
 	import { V1_BASE_URL, type TableParams } from '$lib/constant'
 	import {
@@ -21,7 +21,7 @@
 	import * as Dialog from '$lib/components/ui/dialog/index.js'
 	import SearchIcon from '@lucide/svelte/icons/search'
 	import CalendarIcon from '@lucide/svelte/icons/calendar'
-	import { realtimeQueryOptions } from '$lib/utils/realtime-query'
+	import { createEventSource } from '$lib/utils/event-source'
 	import { buildInvestigationHref, toEventTimeline } from '$lib/utils/investigation'
 
 	type EventPageParams = TableParams & {
@@ -32,12 +32,14 @@
 		date_to: string
 	}
 
+	const queryClient = useQueryClient()
 	const tableParams = $derived(parseTableParams($page.url))
 	const params = $derived(parseEventParams($page.url, tableParams))
 	let dateFrom = $state('')
 	let dateTo = $state('')
 	let selectedEventID = $state<string | null>(null)
 	let detailDialogOpen = $state(false)
+	let sseStatus = $state<'connected' | 'connecting' | 'disconnected'>('disconnected')
 
 	$effect(() => {
 		if (!detailDialogOpen) {
@@ -57,8 +59,28 @@
 				`${V1_BASE_URL}/events?${buildEventsQueryString(params)}`,
 				{ method: 'GET' },
 			),
-		...realtimeQueryOptions(),
+		refetchOnWindowFocus: true,
 	}))
+
+	// SSE connection for realtime event updates.
+	let cleanupSSE: (() => void) | undefined
+
+	$effect(() => {
+		cleanupSSE = createEventSource({
+			onEvent: {
+				new_event: (_event: MessageEvent) => {
+					queryClient.invalidateQueries({ queryKey: ['events'] })
+				},
+			},
+			onStatus: (status) => {
+				sseStatus = status
+			},
+		})
+
+		return () => {
+			cleanupSSE?.()
+		}
+	})
 
 	const events = $derived(eventsQuery.data?.data.items ?? [])
 	const metadata = $derived(eventsQuery.data?.data.metadata)
@@ -68,7 +90,7 @@
 		queryKey: ['event-detail', selectedEventID],
 		enabled: !!selectedEventID,
 		queryFn: () => clientFetch<ApiResponse<EventDetail>>(`${V1_BASE_URL}/events/${selectedEventID}`, { method: 'GET' }),
-		...realtimeQueryOptions(!!selectedEventID),
+		refetchOnWindowFocus: true,
 	}))
 
 	function parseEventParams(url: URL, table: TableParams): EventPageParams {
@@ -206,7 +228,7 @@
 		</div>
 
 		<Select.Root type="single" value={params.severity} onValueChange={(v) => updateExtraParams({ severity: String(v ?? '') })}>
-			<Select.Trigger class="w-[170px]">{params.severity || 'All severities'}</Select.Trigger>
+			<Select.Trigger class="w-42.5">{params.severity || 'All severities'}</Select.Trigger>
 			<Select.Content>
 				<Select.Item value="">All severities</Select.Item>
 				<Select.Item value="INFO">INFO</Select.Item>
@@ -218,7 +240,7 @@
 		</Select.Root>
 
 		<Input
-			class="w-[170px]"
+			class="w-42.5"
 			placeholder="Category"
 			value={params.category}
 			onchange={(e) => updateExtraParams({ category: (e.target as HTMLInputElement).value })}
@@ -259,6 +281,10 @@
 		{#if metadata}
 			<span class="ml-auto text-sm text-muted-foreground">{metadata.total} event{metadata.total !== 1 ? 's' : ''} total</span>
 		{/if}
+		<span class="flex items-center gap-1.5 text-xs text-muted-foreground" title="Realtime stream status">
+			<span class="inline-block h-2 w-2 rounded-full {sseStatus === 'connected' ? 'bg-green-500' : sseStatus === 'connecting' ? 'bg-yellow-500 animate-pulse' : 'bg-red-500'}"></span>
+			{sseStatus === 'connected' ? 'Live' : sseStatus === 'connecting' ? 'Connecting' : 'Offline'}
+		</span>
 	</div>
 
 	<div class="rounded-lg border bg-background overflow-hidden">

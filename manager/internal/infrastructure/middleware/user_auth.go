@@ -35,6 +35,40 @@ func UserAuth(jwtCfg config.JWTConfig) gin.HandlerFunc {
 	}
 }
 
+// UserAuthSSE returns a Gin middleware that validates a JWT access token from
+// either the Authorization header or a "token" query parameter. This is needed
+// for SSE endpoints because the browser EventSource API does not support custom headers.
+func UserAuthSSE(jwtCfg config.JWTConfig) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var tokenStr string
+
+		// Try Authorization header first.
+		header := c.GetHeader("Authorization")
+		if header != "" && strings.HasPrefix(header, "Bearer ") {
+			tokenStr = strings.TrimPrefix(header, "Bearer ")
+		}
+
+		// Fall back to query parameter.
+		if tokenStr == "" {
+			tokenStr = c.Query("token")
+		}
+
+		if tokenStr == "" {
+			response.WriteWithAbort(c, http.StatusUnauthorized, "missing authentication token", nil)
+			return
+		}
+
+		claims, err := jwtpkg.ValidateAccessToken(tokenStr, jwtCfg.Secret)
+		if err != nil {
+			response.WriteWithAbort(c, http.StatusUnauthorized, "invalid or expired token", nil)
+			return
+		}
+
+		c.Set(UserClaimsKey, claims)
+		c.Next()
+	}
+}
+
 // UserClaimsFromContext retrieves the JWT claims stored by UserAuth middleware.
 // Returns nil if the middleware was not applied or authentication failed.
 func UserClaimsFromContext(c *gin.Context) *jwtpkg.Claims {

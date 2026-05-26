@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/hildanku/xemarify/internal/engine"
 	"github.com/hildanku/xemarify/internal/infrastructure/metrics"
+	"github.com/hildanku/xemarify/internal/infrastructure/sse"
 	"github.com/hildanku/xemarify/internal/modules/event/domain"
 	eventRepo "github.com/hildanku/xemarify/internal/modules/event/repository"
 	"github.com/hildanku/xemarify/internal/modules/event/transport"
@@ -25,6 +26,7 @@ var ErrEventNotFound = errors.New("event not found")
 type EventService struct {
 	eventRepo eventRepo.EventRepository
 	engine    engine.Engine
+	hub       *sse.Hub
 	metrics   *metrics.Metrics
 	log       *logrus.Logger
 }
@@ -33,12 +35,14 @@ type EventService struct {
 func NewEventService(
 	eventRepo eventRepo.EventRepository,
 	detectionEngine engine.Engine,
+	hub *sse.Hub,
 	m *metrics.Metrics,
 	log *logrus.Logger,
 ) *EventService {
 	return &EventService{
 		eventRepo: eventRepo,
 		engine:    detectionEngine,
+		hub:       hub,
 		metrics:   m,
 		log:       log,
 	}
@@ -100,6 +104,11 @@ func (s *EventService) IngestBatch(ctx context.Context, authenticatedAgentID uui
 					"agent_id": authenticatedAgentID,
 				}).WithError(err).Warn("rule engine processing failed")
 			}
+		}
+
+		// Broadcast the event to all connected SSE clients.
+		if s.hub != nil {
+			s.hub.Broadcast("new_event", transport.ToEventResponse(event))
 		}
 
 		accepted++
