@@ -7,19 +7,23 @@
 	import { page } from '$app/stores'
 	import { clientFetch } from '$lib/client'
 	import { V1_BASE_URL } from '$lib/constant'
-	import { parseTableParams, updateTableParams, buildQueryString } from '$lib/utils/table-params'
+	import {
+		parseTableParams,
+		updateTableParams,
+		buildQueryString,
+	} from '$lib/utils/table-params'
+	import { createTableHandlers } from '$lib/utils/table-helpers'
 	import RulesDataTable from '$lib/components/table/rules/rules-table.svelte'
 	import RuleUpsertDialog from '$lib/components/table/rules/rule-upsert-dialog.svelte'
-	import Loading from '$lib/components/ui/custom/loading.svelte'
-	import Pagination from '$lib/components/ui/custom/pagination.svelte'
-	import LimitSelect from '$lib/components/ui/custom/limit-select.svelte'
+	import QueryStateWrapper from '$lib/components/custom/query-state-wrapper.svelte'
+	import SearchInput from '$lib/components/custom/search-input.svelte'
+	import TableFooter from '$lib/components/custom/table-footer.svelte'
 	import { Button } from '$lib/components/ui/button/index.js'
-	import { Input } from '$lib/components/ui/input/index.js'
-	import SearchIcon from '@lucide/svelte/icons/search'
 	import Trash2Icon from '@lucide/svelte/icons/trash-2'
 
 	const queryClient = useQueryClient()
 	const params = $derived(parseTableParams($page.url))
+	const { handleSortChange, gotoPage, handleLimitChange } = createTableHandlers()
 
 	let rowSelection = $state<RowSelectionState>({})
 	const selectedIds = $derived(Object.keys(rowSelection).filter((k) => rowSelection[k]))
@@ -106,17 +110,6 @@
 		if (!confirm(`Delete ${selectedIds.length} selected rule(s)?`)) return
 		bulkDeleteMutation.mutate(selectedIds)
 	}
-
-	function handleSortChange(sort: string, order: 'asc' | 'desc') {
-		updateTableParams({ sort, order }, $page.url)
-	}
-	function gotoPage(p: number) {
-		updateTableParams({ page: p }, $page.url)
-	}
-	function handleLimitChange(value: string | undefined) {
-		if (!value) return
-		updateTableParams({ limit: parseInt(value), page: 1 }, $page.url)
-	}
 </script>
 
 <div class="flex flex-1 flex-col gap-4 p-4 max-w-full">
@@ -129,15 +122,11 @@
 	</div>
 
 	<div class="flex flex-wrap items-center gap-2">
-		<div class="relative flex-1 min-w-48 max-w-xs">
-			<SearchIcon class="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-			<Input
-				class="pl-9"
-				placeholder="Search rules…"
-				value={params.search}
-				oninput={(e) => updateTableParams({ search: (e.target as HTMLInputElement).value }, $page.url)}
-			/>
-		</div>
+		<SearchInput
+			placeholder="Search rules…"
+			value={params.search}
+			onInput={(v) => updateTableParams({ search: v }, $page.url)}
+		/>
 
 		{#if selectedIds.length > 0}
 			<Button variant="destructive" size="sm" onclick={handleBulkDelete} disabled={bulkDeleteMutation.isPending}>
@@ -152,22 +141,17 @@
 	</div>
 
 	<div class="rounded-lg border bg-background overflow-hidden">
-		{#if rulesQuery.isPending}
-			<Loading label="Loading rules…" />
-		{:else if rulesQuery.isError}
-			<div class="flex flex-col items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
-				<span class="text-destructive font-medium">Failed to load rules</span>
-				<span>{rulesQuery.error?.message}</span>
-				<Button variant="outline" size="sm" onclick={() => rulesQuery.refetch()}>Try again</Button>
-			</div>
-		{:else if rules.length === 0}
-			<div class="flex flex-col items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
-				<span>No rules found</span>
-				{#if params.search}
-					<Button variant="ghost" size="sm" onclick={() => updateTableParams({ search: '' }, $page.url)}>Clear search</Button>
-				{/if}
-			</div>
-		{:else}
+		<QueryStateWrapper
+			isPending={rulesQuery.isPending}
+			isError={rulesQuery.isError}
+			error={rulesQuery.error}
+			isEmpty={rules.length === 0}
+			loadingLabel="Loading rules…"
+			emptyMessage="No rules found"
+			showClearSearch={!!params.search}
+			onRetry={() => rulesQuery.refetch()}
+			onClearSearch={() => updateTableParams({ search: '' }, $page.url)}
+		>
 			<RulesDataTable
 				data={rules}
 				{params}
@@ -176,11 +160,14 @@
 				onDelete={handleDeleteSingle}
 				onEdit={handleEdit}
 			/>
-		{/if}
+		</QueryStateWrapper>
 	</div>
 
-	<div class="flex items-center justify-between">
-		<LimitSelect value={params.limit} onValueChange={(v) => handleLimitChange(String(v))} />
-		<Pagination page={params.page} {totalPages} onPageChange={gotoPage} />
-	</div>
+	<TableFooter
+		page={params.page}
+		{totalPages}
+		limit={params.limit}
+		onPageChange={gotoPage}
+		onLimitChange={handleLimitChange}
+	/>
 </div>

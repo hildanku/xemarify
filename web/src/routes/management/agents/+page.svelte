@@ -20,19 +20,19 @@
 		updateTableParams,
 		buildQueryString,
 	} from '$lib/utils/table-params'
+	import { createTableHandlers } from '$lib/utils/table-helpers'
 	import AgentsDataTable from '$lib/components/table/agents/agents-table.svelte'
-	import Loading from '$lib/components/ui/custom/loading.svelte'
-	import Pagination from '$lib/components/ui/custom/pagination.svelte'
-	import LimitSelect from '$lib/components/ui/custom/limit-select.svelte'
+	import QueryStateWrapper from '$lib/components/custom/query-state-wrapper.svelte'
+	import SearchInput from '$lib/components/custom/search-input.svelte'
+	import TableFooter from '$lib/components/custom/table-footer.svelte'
 	import { Button } from '$lib/components/ui/button/index.js'
-	import { Input } from '$lib/components/ui/input/index.js'
-	import SearchIcon from '@lucide/svelte/icons/search'
 	import Trash2Icon from '@lucide/svelte/icons/trash-2'
 	import AgentCreateDialog from '$lib/components/table/agents/agent-create-dialog.svelte'
 	import { realtimeQueryOptions } from '$lib/utils/realtime-query'
 
 	const queryClient = useQueryClient()
 	const params = $derived(parseTableParams($page.url))
+	const { handleSortChange, gotoPage, handleLimitChange } = createTableHandlers()
 
 	let rowSelection = $state<RowSelectionState>({})
 	const selectedIds = $derived(
@@ -120,7 +120,6 @@
 		}
 	}
 
-	// Bulk delete - fires parallel DELETE requests for all selected rows
 	const bulkDeleteMutation = createMutation(() => ({
 		mutationFn: async (ids: string[]) => {
 			await Promise.all(
@@ -144,20 +143,6 @@
 		if (!confirm(`Delete ${selectedIds.length} selected agent(s)?`)) return
 		bulkDeleteMutation.mutate(selectedIds)
 	}
-
-	function handleSortChange(sort: string, order: 'asc' | 'desc') {
-		updateTableParams({ sort, order }, $page.url)
-	}
-
-	function gotoPage(p: number) {
-		updateTableParams({ page: p }, $page.url)
-	}
-
-	function handleLimitChange(value: string | undefined) {
-		if (!value) return
-		updateTableParams({ limit: parseInt(value), page: 1 }, $page.url)
-	}
-
 </script>
 
 <div class="flex flex-1 flex-col gap-4 p-4 max-w-full">
@@ -184,22 +169,11 @@
 	</div>
 
 	<div class="flex flex-wrap items-center gap-2">
-		<div class="relative flex-1 min-w-48 max-w-xs">
-			<SearchIcon
-				class="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none"
-			/>
-			<Input
-				class="pl-9"
-				placeholder="Search agents..."
-				value={params.search}
-				oninput={(e) =>
-					updateTableParams(
-						{ search: (e.target as HTMLInputElement).value },
-						$page.url,
-					)}
-			/>
-		</div>
-		<!-- Bulk delete -->
+		<SearchInput
+			placeholder="Search agents..."
+			value={params.search}
+			onInput={(v) => updateTableParams({ search: v }, $page.url)}
+		/>
 		{#if selectedIds.length > 0}
 			<Button
 				variant="destructive"
@@ -220,38 +194,17 @@
 	</div>
 
 	<div class="rounded-lg border bg-background overflow-hidden">
-		{#if agentsQuery.isPending}
-			<Loading label="Loading agents…" />
-		{:else if agentsQuery.isError}
-			<div
-				class="flex flex-col items-center justify-center gap-2 py-12 text-sm text-muted-foreground"
-			>
-				<span class="text-destructive font-medium">Failed to load agents</span>
-				<span>{agentsQuery.error?.message}</span>
-				<Button
-					variant="outline"
-					size="sm"
-					onclick={() => agentsQuery.refetch()}
-				>
-					Try again
-				</Button>
-			</div>
-		{:else if agents.length === 0}
-			<div
-				class="flex flex-col items-center justify-center gap-2 py-12 text-sm text-muted-foreground"
-			>
-				<span>No agents found</span>
-				{#if params.search}
-					<Button
-						variant="ghost"
-						size="sm"
-						onclick={() => updateTableParams({ search: '' }, $page.url)}
-					>
-						Clear search
-					</Button>
-				{/if}
-			</div>
-		{:else}
+		<QueryStateWrapper
+			isPending={agentsQuery.isPending}
+			isError={agentsQuery.isError}
+			error={agentsQuery.error}
+			isEmpty={agents.length === 0}
+			loadingLabel="Loading agents…"
+			emptyMessage="No agents found"
+			showClearSearch={!!params.search}
+			onRetry={() => agentsQuery.refetch()}
+			onClearSearch={() => updateTableParams({ search: '' }, $page.url)}
+		>
 			<AgentsDataTable
 				data={agents}
 				{params}
@@ -260,20 +213,14 @@
 				onDelete={handleDeleteSingle}
 				onEdit={handleEdit}
 			/>
-		{/if}
+		</QueryStateWrapper>
 	</div>
-	<div class="flex items-center justify-between">
-		<LimitSelect
-			value={params.limit}
-			onValueChange={(v) => handleLimitChange(String(v))}
-		/>
-		<!-- {#if (metadata?.total_pages ?? 0) > 1}
-			<Pagination
-				page={params.page}
-				{totalPages}
-				onPageChange={gotoPage}
-			/>
-		{/if} -->
-		<Pagination page={params.page} {totalPages} onPageChange={gotoPage} />
-	</div>
+
+	<TableFooter
+		page={params.page}
+		{totalPages}
+		limit={params.limit}
+		onPageChange={gotoPage}
+		onLimitChange={handleLimitChange}
+	/>
 </div>
