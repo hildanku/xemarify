@@ -14,6 +14,7 @@ import (
 	"github.com/hildanku/xemarify-agent/internal/agent/apiclient"
 	"github.com/hildanku/xemarify-agent/internal/agent/collector"
 	"github.com/hildanku/xemarify-agent/internal/agent/config"
+	"github.com/hildanku/xemarify-agent/internal/agent/logger"
 	"github.com/hildanku/xemarify-agent/internal/agent/model"
 	"github.com/hildanku/xemarify-agent/internal/agent/pipeline"
 )
@@ -31,6 +32,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to load config %s: %v", configPath, err)
 	}
+
+	logger.Init(logger.Config{
+		Path:       cfg.Log.Path,
+		MaxSizeMB:  cfg.Log.MaxSizeMB,
+		MaxBackups: cfg.Log.MaxBackups,
+	})
+	defer logger.Close()
 
 	if cfg.Server.Endpoint == "" {
 		log.Fatalf("server.endpoint is required in %s", configPath)
