@@ -1,9 +1,14 @@
 package collector
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -17,28 +22,45 @@ import (
 	gnet "github.com/shirou/gopsutil/v4/net"
 )
 
+// InventoryPayload is the request body sent to POST /api/v1/agents/inventory.
+type InventoryPayload struct {
+	AgentID         string    `json:"agent_id"`
+	OS              string    `json:"os"`
+	Arch            string    `json:"arch"`
+	KernelVersion   string    `json:"kernel_version"`
+	CPUModel        string    `json:"cpu_model"`
+	CPUCores        int       `json:"cpu_cores"`
+	MemoryTotalMB   int64     `json:"memory_total_mb"`
+	UptimeSeconds   int64     `json:"uptime_seconds"`
+	IPAddresses     []string  `json:"ip_addresses"`
+	NginxInstalled  bool      `json:"nginx_installed"`
+	ApacheInstalled bool      `json:"apache_installed"`
+	CollectedAt     time.Time `json:"collected_at"`
+}
+
+// RunInventory collects a system snapshot on startup and then on every interval,
+// sending it directly to POST /api/v1/agents/inventory — bypassing the event pipeline.
 func RunInventory(
 	ctx context.Context,
 	hostname string,
-	output chan<- model.IngestEvent,
+	client *http.Client,
+	endpoint string,
+	agentID string,
+	agentSecret string,
 	interval time.Duration,
 ) {
 	if interval <= 0 {
 		interval = 60 * time.Second
 	}
 
-	emit := func() {
-		event := buildInventoryEvent(hostname)
-		select {
-		case output <- event:
-		case <-ctx.Done():
-			return
-		default:
-			log.Printf("dropping inventory event: forwarder queue is full")
+	send := func() {
+		payload := buildInventoryPayload(hostname, agentID)
+		if err := postInventory(ctx, client, endpoint, agentSecret, payload); err != nil {
+			log.Printf("inventory send failed: %v", err)
 		}
 	}
 
-	emit()
+	send()
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -48,56 +70,58 @@ func RunInventory(
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			emit()
+			send()
 		}
 	}
 }
 
-func buildInventoryEvent(hostname string) model.IngestEvent {
+func postInventory(ctx context.Context, client *http.Client, endpoint, agentSecret string, payload InventoryPayload) error {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal inventory: %w", err)
+	}
+
+	url := strings.TrimRight(endpoint, "/") + "/api/v1/agents/inventory"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(model.AgentSecretHeader, agentSecret)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("send inventory: %w", err)
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("inventory endpoint returned status %d", resp.StatusCode)
+	}
+
+	return nil
+}
+
+func buildInventoryPayload(hostname, agentID string) InventoryPayload {
 	if strings.TrimSpace(hostname) == "" {
 		hostname = "unknown-host"
 	}
 
-	now := time.Now().UTC()
-	sourceName := "inventory:host"
-	normalized := map[string]interface{}{
-		"event_type":          "inventory",
-		"source_type":         "inventory",
-		"source_name":         sourceName,
-		"hostname":            hostname,
-		"os":                  runtime.GOOS,
-		"arch":                runtime.GOARCH,
-		"kernel_version":      kernelVersion(),
-		"ip_addresses":        listIPAddresses(),
-		"cpu_model":           cpuModel(),
-		"cpu_cores":           cpuCores(),
-		"memory_total_mb":     memoryTotalMB(),
-		"uptime_seconds":      uptimeSeconds(),
-		"nginx_installed":     binaryExists("nginx"),
-		"apache_installed":    binaryExists("apache2") || binaryExists("httpd"),
-		"inventory_collected": now.Format(time.RFC3339),
+	return InventoryPayload{
+		AgentID:         agentID,
+		OS:              runtime.GOOS,
+		Arch:            runtime.GOARCH,
+		KernelVersion:   kernelVersion(),
+		IPAddresses:     listIPAddresses(),
+		CPUModel:        cpuModel(),
+		CPUCores:        cpuCores(),
+		MemoryTotalMB:   memoryTotalMB(),
+		UptimeSeconds:   uptimeSeconds(),
+		NginxInstalled:  binaryExists("nginx"),
+		ApacheInstalled: binaryExists("apache2") || binaryExists("httpd"),
+		CollectedAt:     time.Now().UTC(),
 	}
-
-	raw := inventorySummary(normalized)
-
-	return model.IngestEvent{
-		EventTime:  now,
-		Hostname:   hostname,
-		SourceIP:   "",
-		InputType:  "inventory",
-		SourceName: sourceName,
-		Facility:   "inventory",
-		Severity:   "INFO",
-		Category:   "inventory",
-		Message:    "inventory snapshot",
-		Raw:        raw,
-		Attributes: normalized,
-		Normalized: normalized,
-	}
-}
-
-func inventorySummary(fields map[string]interface{}) string {
-	return "inventory snapshot"
 }
 
 func listIPAddresses() []string {

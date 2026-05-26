@@ -21,6 +21,9 @@ import (
 	agentHandler "github.com/hildanku/xemarify/internal/modules/agent/handler"
 	agentRepo "github.com/hildanku/xemarify/internal/modules/agent/repository"
 	agentService "github.com/hildanku/xemarify/internal/modules/agent/service"
+	inventoryHandler "github.com/hildanku/xemarify/internal/modules/inventory/handler"
+	inventoryRepo "github.com/hildanku/xemarify/internal/modules/inventory/repository"
+	inventoryService "github.com/hildanku/xemarify/internal/modules/inventory/service"
 	alertHandler "github.com/hildanku/xemarify/internal/modules/alert/handler"
 	alertRepo "github.com/hildanku/xemarify/internal/modules/alert/repository"
 	alertService "github.com/hildanku/xemarify/internal/modules/alert/service"
@@ -73,6 +76,7 @@ func main() {
 
 	// Repositories
 	agentRepository := agentRepo.NewPgAgentRepository(db)
+	inventoryRepository := inventoryRepo.NewPgInventoryRepository(db)
 	eventRepository := eventRepo.NewPgEventRepository(db)
 	userRepository := userRepo.NewPgUserRepository(db)
 	authRepository := authRepo.NewPgAuthRepository(db)
@@ -83,6 +87,7 @@ func main() {
 	// Services
 	auditLogService := auditService.NewAuditLogService(auditLogRepository, log)
 	agentSvc := agentService.NewAgentService(agentRepository, auditLogService, log)
+	inventorySvc := inventoryService.NewInventoryService(inventoryRepository, log)
 	ruleEngine, err := engine.NewRuleEngine(context.Background(), db, log)
 	if err != nil {
 		log.WithError(err).Fatal("failed to initialize rule engine")
@@ -97,6 +102,7 @@ func main() {
 	alertSvc := alertService.NewAlertService(alertRepository, auditLogService, log)
 	agentHandle := agentHandler.NewAgentHandler(agentSvc, log)
 	evtHandler := eventHandler.NewEventHandler(evtService, eventHub, m, log)
+	inventoryHandle := inventoryHandler.NewInventoryHandler(inventorySvc, log)
 
 	// HTTP router
 	if cfg.LogLevel != "debug" {
@@ -153,6 +159,7 @@ func main() {
 	agentSessionGroup.Use(middleware.AgentAuth(agentRepository, log))
 	agentSessionGroup.Use(middleware.AgentRateLimit(rateCfg, log))
 	agentHandle.RegisterAgentSession(agentSessionGroup)
+	inventoryHandle.RegisterAgentSession(agentSessionGroup)
 
 	eventIngestGroup := apiV1.Group("")
 	eventIngestGroup.Use(middleware.AgentAuth(agentRepository, log))
@@ -173,6 +180,7 @@ func main() {
 	agentsGroup := managerV1.Group("/agents")
 	agentsGroup.Use(middleware.RequireRole(userDomain.RoleManager))
 	agentHandle.Register(agentsGroup)
+	inventoryHandle.Register(agentsGroup)
 
 	// Admin - Manager only
 	adminGroup := managerV1.Group("/admin")

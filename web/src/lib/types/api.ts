@@ -28,6 +28,22 @@ export interface UpdateAgentRequest {
 	status: AgentStatus
 }
 
+export interface AgentInventory {
+	agent_id: string
+	os: string
+	arch: string
+	kernel_version: string
+	cpu_model: string
+	cpu_cores: number
+	memory_total_mb: number
+	uptime_seconds: number
+	ip_addresses: string[]
+	nginx_installed: boolean
+	apache_installed: boolean
+	collected_at: string | null
+	updated_at: string
+}
+
 export type UserRole = 'MANAGER' | 'ANALYST' | 'VIEWER'
 
 export interface User {

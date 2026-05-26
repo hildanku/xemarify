@@ -2,7 +2,11 @@
 	import { z } from 'zod'
 	import { superForm, defaults } from 'sveltekit-superforms'
 	import { zod4Client, zod4 } from 'sveltekit-superforms/adapters'
-	import type { Agent } from '$lib/types/api'
+	import { createQuery } from '@tanstack/svelte-query'
+	import { clientFetch, type ApiResponse } from '$lib/client'
+	import { V1_BASE_URL } from '$lib/constant'
+	import type { Agent, AgentInventory } from '$lib/types/api'
+	import { formatBytes, formatUptime } from '$lib/utils/format'
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js'
 	import * as Dialog from '$lib/components/ui/dialog/index.js'
 	import * as Form from '$lib/components/ui/form/index.js'
@@ -31,6 +35,19 @@
 
 	let viewOpen = $state(false)
 	let editOpen = $state(false)
+
+	const inventoryQuery = createQuery<ApiResponse<AgentInventory>>(() => ({
+		queryKey: ['agents', agent.id, 'inventory'],
+		queryFn: () =>
+			clientFetch<ApiResponse<AgentInventory>>(
+				`${V1_BASE_URL}/agents/${agent.id}/inventory`,
+				{ method: 'GET' },
+			),
+		enabled: viewOpen,
+		retry: false,
+	}))
+
+	const inventory = $derived(inventoryQuery.data?.data ?? null)
 
 	const STATUSES = ['ONLINE', 'OFFLINE'] as const
 
@@ -120,53 +137,132 @@
 
 <!-- View details dialog -->
 <Dialog.Root bind:open={viewOpen}>
-	<Dialog.Content class="max-w-lg">
+	<Dialog.Content class="max-w-lg max-h-[90vh] overflow-y-auto">
 		<Dialog.Header>
 			<Dialog.Title>{agent.name}</Dialog.Title>
 			<Dialog.Description>Agent Details</Dialog.Description>
 		</Dialog.Header>
-		<div class="space-y-4 py-2">
-			<div class="flex items-center gap-2">
-				<AgentStatusBadge status={agent.status} />
+		<div class="space-y-6 py-2">
+			<!-- Agent identity -->
+			<div class="space-y-4">
+				<div class="flex items-center gap-2">
+					<AgentStatusBadge status={agent.status} />
+				</div>
+				<div class="grid grid-cols-2 gap-4 text-sm">
+					<div>
+						<p class="font-medium text-muted-foreground">Agent ID</p>
+						<p class="font-mono text-xs mt-0.5 break-all">{agent.id}</p>
+					</div>
+					<div>
+						<p class="font-medium text-muted-foreground">Name</p>
+						<p class="mt-0.5">{agent.name}</p>
+					</div>
+					<div>
+						<p class="font-medium text-muted-foreground">Hostname</p>
+						<p class="mt-0.5">{agent.hostname ?? '—'}</p>
+					</div>
+					<div>
+						<p class="font-medium text-muted-foreground">IP Address</p>
+						<p class="font-mono mt-0.5">{agent.ip_address ?? '—'}</p>
+					</div>
+					<div>
+						<p class="font-medium text-muted-foreground">Version</p>
+						<p class="mt-0.5">{agent.version ?? '—'}</p>
+					</div>
+					<div>
+						<p class="font-medium text-muted-foreground">Created At</p>
+						<div class="mt-0.5">
+							<CompactDate dateString={agent.created_at} />
+						</div>
+					</div>
+					<div class="col-span-2">
+						<p class="font-medium text-muted-foreground">Last Seen</p>
+						<div class="mt-0.5">
+							<CompactDate dateString={agent.last_seen_at} fallback="Never" />
+						</div>
+					</div>
+				</div>
 			</div>
-			<div class="grid grid-cols-2 gap-4 text-sm">
-				<div>
-					<p class="font-medium text-muted-foreground">Agent ID</p>
-					<p class="font-mono text-xs mt-0.5 break-all">{agent.id}</p>
+
+			<!-- System Snapshot -->
+			<div class="space-y-3">
+				<div class="flex items-center gap-2">
+					<p class="text-sm font-semibold">System Snapshot</p>
+					{#if inventoryQuery.isFetching}
+						<span class="text-xs text-muted-foreground">Loading...</span>
+					{:else if inventory?.collected_at}
+						<span class="text-xs text-muted-foreground">
+							collected <CompactDate dateString={inventory.collected_at} />
+						</span>
+					{/if}
 				</div>
-				<div>
-					<p class="font-medium text-muted-foreground">Name</p>
-					<p class="mt-0.5">{agent.name}</p>
-				</div>
-				<div>
-					<p class="font-medium text-muted-foreground">Hostname</p>
-					<p class="mt-0.5">{agent.hostname ?? '—'}</p>
-				</div>
-				<div>
-					<p class="font-medium text-muted-foreground">IP Address</p>
-					<p class="font-mono mt-0.5">{agent.ip_address ?? '—'}</p>
-				</div>
-				<div>
-					<p class="font-medium text-muted-foreground">Version</p>
-					<p class="mt-0.5">{agent.version ?? '—'}</p>
-				</div>
-				<div>
-					<p class="font-medium text-muted-foreground">Created At</p>
-					<div class="mt-0.5">
-						<CompactDate dateString={agent.created_at} />
+
+				{#if inventoryQuery.isError}
+					<p class="text-xs text-muted-foreground rounded-md border border-dashed px-3 py-4 text-center">
+						No inventory snapshot available yet.
+					</p>
+				{:else if inventory}
+					<div class="grid grid-cols-2 gap-4 text-sm">
+						<div>
+							<p class="font-medium text-muted-foreground">OS</p>
+							<p class="mt-0.5">{inventory.os || '—'}</p>
+						</div>
+						<div>
+							<p class="font-medium text-muted-foreground">Arch</p>
+							<p class="mt-0.5">{inventory.arch || '—'}</p>
+						</div>
+						<div class="col-span-2">
+							<p class="font-medium text-muted-foreground">Kernel</p>
+							<p class="font-mono text-xs mt-0.5">{inventory.kernel_version || '—'}</p>
+						</div>
+						<div>
+							<p class="font-medium text-muted-foreground">CPU</p>
+							<p class="mt-0.5 text-xs">{inventory.cpu_model || '—'}</p>
+						</div>
+						<div>
+							<p class="font-medium text-muted-foreground">CPU Cores</p>
+							<p class="mt-0.5">{inventory.cpu_cores}</p>
+						</div>
+						<div>
+							<p class="font-medium text-muted-foreground">Memory</p>
+							<p class="mt-0.5">{formatBytes(inventory.memory_total_mb)}</p>
+						</div>
+						<div>
+							<p class="font-medium text-muted-foreground">Uptime</p>
+							<p class="mt-0.5">{formatUptime(inventory.uptime_seconds)}</p>
+						</div>
+						<div class="col-span-2">
+							<p class="font-medium text-muted-foreground">IP Addresses</p>
+							<div class="mt-0.5 flex flex-wrap gap-1">
+								{#if inventory.ip_addresses.length > 0}
+									{#each inventory.ip_addresses as ip (ip)}
+										<span class="font-mono text-xs rounded bg-muted px-1.5 py-0.5">{ip}</span>
+									{/each}
+								{:else}
+									<span>—</span>
+								{/if}
+							</div>
+						</div>
+						<div>
+							<p class="font-medium text-muted-foreground">Nginx</p>
+							<p class="mt-0.5">{inventory.nginx_installed ? 'Installed' : 'Not found'}</p>
+						</div>
+						<div>
+							<p class="font-medium text-muted-foreground">Apache</p>
+							<p class="mt-0.5">{inventory.apache_installed ? 'Installed' : 'Not found'}</p>
+						</div>
 					</div>
-				</div>
-				<div class="col-span-2">
-					<p class="font-medium text-muted-foreground">Last Seen</p>
-					<div class="mt-0.5">
-						<CompactDate dateString={agent.last_seen_at} fallback="Never" />
+				{:else if inventoryQuery.isFetching}
+					<div class="grid grid-cols-2 gap-4">
+						{#each Array(8) as _, i (i)}
+							<div class="h-8 rounded bg-muted animate-pulse"></div>
+						{/each}
 					</div>
-				</div>
+				{/if}
 			</div>
 		</div>
 		<Dialog.Footer>
-			<Button variant="outline" onclick={() => (viewOpen = false)}>Close</Button
-			>
+			<Button variant="outline" onclick={() => (viewOpen = false)}>Close</Button>
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>
