@@ -37,6 +37,11 @@ type Config struct {
 	Syslog struct {
 		Listen string `yaml:"listen"`
 	} `yaml:"syslog"`
+	Log struct {
+		Path       string `yaml:"path"`
+		MaxSizeMB  int64  `yaml:"max_size_mb"`
+		MaxBackups int    `yaml:"max_backups"`
+	} `yaml:"log"`
 }
 
 func Load(path string) (*Config, error) {
