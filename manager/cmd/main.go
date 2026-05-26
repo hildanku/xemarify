@@ -17,6 +17,7 @@ import (
 	infraLogger "github.com/hildanku/xemarify/internal/infrastructure/logger"
 	"github.com/hildanku/xemarify/internal/infrastructure/metrics"
 	"github.com/hildanku/xemarify/internal/infrastructure/middleware"
+	"github.com/hildanku/xemarify/internal/infrastructure/sse"
 	agentHandler "github.com/hildanku/xemarify/internal/modules/agent/handler"
 	agentRepo "github.com/hildanku/xemarify/internal/modules/agent/repository"
 	agentService "github.com/hildanku/xemarify/internal/modules/agent/service"
@@ -66,6 +67,10 @@ func main() {
 	// Metrics
 	m := metrics.New()
 
+	// SSE Hub
+	eventHub := sse.NewHub()
+	defer eventHub.Stop()
+
 	// Repositories
 	agentRepository := agentRepo.NewPgAgentRepository(db)
 	eventRepository := eventRepo.NewPgEventRepository(db)
@@ -84,14 +89,14 @@ func main() {
 	}
 	defer ruleEngine.Stop()
 
-	evtService := eventService.NewEventService(eventRepository, ruleEngine, m, log)
+	evtService := eventService.NewEventService(eventRepository, ruleEngine, eventHub, m, log)
 	authSvc := authService.NewAuthService(userRepository, authRepository, auditLogService, cfg.JWT, log)
 	setupSvc := setupService.NewSetupService(db, cfg.JWT, cfg.Setup.Token, log)
 	userSvc := userService.NewUserService(db, userRepository, auditLogService, log)
 	ruleSvc := ruleService.NewRuleService(ruleRepository, ruleEngine, auditLogService, log)
 	alertSvc := alertService.NewAlertService(alertRepository, auditLogService, log)
 	agentHandle := agentHandler.NewAgentHandler(agentSvc, log)
-	evtHandler := eventHandler.NewEventHandler(evtService, m, log)
+	evtHandler := eventHandler.NewEventHandler(evtService, eventHub, m, log)
 
 	// HTTP router
 	if cfg.LogLevel != "debug" {
@@ -184,6 +189,12 @@ func main() {
 	eventsGroup := managerV1.Group("/events")
 	eventsGroup.Use(middleware.RequireRole(userDomain.RoleManager, userDomain.RoleAnalyst))
 	evtHandler.RegisterManager(eventsGroup)
+
+	// Events SSE stream - separate group with query-param auth for EventSource compatibility
+	eventsStreamGroup := router.Group("/api/v1/events")
+	eventsStreamGroup.Use(middleware.UserAuthSSE(cfg.JWT))
+	eventsStreamGroup.Use(middleware.RequireRole(userDomain.RoleManager, userDomain.RoleAnalyst))
+	evtHandler.RegisterStream(eventsStreamGroup)
 
 	// Detection Rules - Manager only
 	rulesGroup := managerV1.Group("/rules")
