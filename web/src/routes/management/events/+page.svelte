@@ -424,3 +424,7 @@
 		</Dialog.Content>
 	</Dialog.Root>
 </div>
+
+<svelte:head>
+	<title>Xemarify - Events</title>
+</svelte:head>

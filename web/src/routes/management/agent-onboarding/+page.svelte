@@ -213,3 +213,7 @@ WantedBy=multi-user.target`
 	</div>
 
 </div>
+
+<svelte:head>
+	<title>Xemarify - Agent Onboarding</title>
+</svelte:head>

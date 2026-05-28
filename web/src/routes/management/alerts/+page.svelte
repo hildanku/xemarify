@@ -382,3 +382,7 @@
 		</Dialog.Content>
 	</Dialog.Root>
 </div>
+
+<svelte:head>
+	<title>Xemarify - Alerts</title>
+</svelte:head>

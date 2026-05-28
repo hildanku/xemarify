@@ -224,3 +224,7 @@
 		onLimitChange={handleLimitChange}
 	/>
 </div>
+
+<svelte:head>
+	<title>Xemarify - Agents</title>
+</svelte:head>

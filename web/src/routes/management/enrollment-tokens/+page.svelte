@@ -124,3 +124,7 @@ agent:
 		</Card.Content>
 	</Card.Root>
 </div>
+
+<svelte:head>
+	<title>Xemarify - Enrollment Tokens</title>
+</svelte:head>

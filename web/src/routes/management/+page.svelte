@@ -313,8 +313,8 @@
 				<RefreshCwIcon class={`mr-2 h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
 				{isRefreshing ? 'Refreshing...' : 'Refresh'}
 			</Button>
-		</div>
 	</div>
+</div>
 
 	<div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
 		<Card.Root>
@@ -501,3 +501,7 @@
 		</Card.Content>
 	</Card.Root>
 </div>
+
+<svelte:head>
+	<title>Xemarify - Dashboard</title>
+</svelte:head>

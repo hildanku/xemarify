@@ -267,3 +267,7 @@
 		<Pagination page={params.page} {totalPages} onPageChange={gotoPage} />
 	</div>
 </div>
+
+<svelte:head>
+	<title>Xemarify - Audit Logs</title>
+</svelte:head>

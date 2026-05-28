@@ -17,6 +17,7 @@
 
 <svelte:head>
 	<link rel="icon" href={favicon} />
+	<title>Xemarify</title>
 </svelte:head>
 
 <QueryClientProvider client={queryClient}>

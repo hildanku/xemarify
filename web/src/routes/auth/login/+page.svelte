@@ -30,3 +30,7 @@
         />
     </div>
 </div>
+
+<svelte:head>
+	<title>Xemarify - Login</title>
+</svelte:head>
