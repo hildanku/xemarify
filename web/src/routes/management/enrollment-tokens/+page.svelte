@@ -2,7 +2,7 @@
 	import { createMutation } from '@tanstack/svelte-query'
 	import { toast } from 'svelte-sonner'
 	import { clientFetch } from '$lib/client'
-	import { BASE_URL, V1_BASE_URL } from '$lib/constant'
+	import { V1_BASE_URL } from '$lib/constant'
 	import { Button } from '$lib/components/ui/button/index.js'
 	import { Input } from '$lib/components/ui/input/index.js'
 	import * as Card from '$lib/components/ui/card/index.js'
@@ -16,9 +16,16 @@
 	let generatedAt = $state<Date | null>(null)
 	let copied = $state(false)
 
+	const managerEndpoint = $derived.by(() => {
+		if (typeof window !== 'undefined') {
+			return window.location.origin
+		}
+		return 'http://localhost:8089'
+	})
+
 	const onboardingHref = $derived.by(() => {
 		const token = encodeURIComponent(generatedToken || 'paste-generated-token-here')
-		return `/management/agent-onboarding?token=${token}&endpoint=${encodeURIComponent(BASE_URL)}`
+		return `/management/agent-onboarding?token=${token}&endpoint=${encodeURIComponent(managerEndpoint)}`
 	})
 
 	const generateTokenMutation = createMutation(() => ({
@@ -110,7 +117,7 @@
 		</Card.Header>
 		<Card.Content>
 			<pre class="rounded-md border bg-muted p-3 text-xs overflow-x-auto"><code>server:
-  endpoint: "{BASE_URL}"
+  endpoint: "{managerEndpoint}"
   insecure: false
 
 enrollment_token: "{generatedToken || 'paste-generated-token-here'}"

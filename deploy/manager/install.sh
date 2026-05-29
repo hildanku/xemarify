@@ -3,7 +3,7 @@
 # Xemarify Manager - One-liner Installer
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/hildanku/xemarify/main/deploy/manager/install.sh | sudo bash
-#   curl -fsSL https://raw.githubusercontent.com/hildanku/xemarify/main/deploy/manager/install.sh | sudo MANAGER_VERSION=v1.1.0-beta WEB_VERSION=v1.1.0-beta bash
+#   curl -fsSL https://raw.githubusercontent.com/hildanku/xemarify/main/deploy/manager/install.sh | sudo MANAGER_VERSION=v1.2.0-beta WEB_VERSION=v1.2.0-beta bash
 #
 # Tested on: Ubuntu 22.04 LTS
 # ============================================================
@@ -12,7 +12,7 @@ set -euo pipefail
 MANAGER_VERSION="${MANAGER_VERSION:-latest}"
 WEB_VERSION="${WEB_VERSION:-latest}"
 MANAGER_PORT="${MANAGER_PORT:-8089}"
-WEB_PORT="${WEB_PORT:-3000}"
+HTTP_PORT="${HTTP_PORT:-80}"
 INSTALL_DIR="${INSTALL_DIR:-/opt/xemarify}"
 
 IMAGE_MANAGER="ghcr.io/hildanku/xemarify/manager"
@@ -124,13 +124,13 @@ POSTGRES_PASSWORD=${DB_PASSWORD}
 POSTGRES_DB=xemarify
 
 MANAGER_PORT=${MANAGER_PORT}
-WEB_PORT=${WEB_PORT}
+HTTP_PORT=${HTTP_PORT}
 
 MANAGER_IMAGE=${IMAGE_MANAGER}:${MANAGER_VERSION}
 WEB_IMAGE=${IMAGE_WEB}:${WEB_VERSION}
 
-VITE_API_BASE_URL=http://${PUBLIC_IP}:${MANAGER_PORT}
-WEB_ORIGIN=http://${PUBLIC_IP}:${WEB_PORT}
+# Public origin for SvelteKit CSRF protection
+WEB_ORIGIN=http://${PUBLIC_IP}:${HTTP_PORT}
 EOF
 
   cat > "${MANAGER_ENV}" <<EOF
@@ -164,13 +164,70 @@ EOF
   log "  PUBLIC IP:    ${PUBLIC_IP}"
   log "  SETUP TOKEN:  ${SETUP_TOKEN}"
   log "=========================================="
-  log "  Dashboard:    http://${PUBLIC_IP}:${WEB_PORT}"
-  log "  Manager API:  http://${PUBLIC_IP}:${MANAGER_PORT}"
+  log "  Dashboard:    http://${PUBLIC_IP}:${HTTP_PORT}"
+  log "  Manager API:  http://${PUBLIC_IP}:${MANAGER_PORT} (direct, for agents)"
   log ""
   log "  Open the dashboard and use the setup token"
   log "  to create your first manager account."
   log "=========================================="
   echo ""
+}
+
+# Write nginx config
+
+write_nginx_conf() {
+  mkdir -p "${INSTALL_DIR}/nginx"
+
+  cat > "${INSTALL_DIR}/nginx/nginx.conf" <<'NGINX'
+upstream manager_backend {
+    server manager:8089;
+}
+
+upstream web_backend {
+    server web:3000;
+}
+
+server {
+    listen 80;
+    server_name _;
+
+    # Security headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    # Request size limit (for event ingestion)
+    client_max_body_size 10m;
+
+    # All API routes -> Manager
+    location /api/ {
+        proxy_pass http://manager_backend;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # SSE support (events/stream)
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 300s;
+    }
+
+    # Everything else -> SvelteKit
+    location / {
+        proxy_pass http://web_backend;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+NGINX
+
+  log "nginx.conf written."
 }
 
 # Write docker-compose.yml
@@ -257,7 +314,7 @@ services:
     ports:
       - "${MANAGER_PORT}:8089"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8089/health >/dev/null"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8089/api/health >/dev/null"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -276,14 +333,33 @@ services:
       HOST: 0.0.0.0
       PORT: 3000
       ORIGIN: ${WEB_ORIGIN}
-    ports:
-      - "${WEB_PORT}:3000"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000 >/dev/null"]
       interval: 10s
       timeout: 3s
       retries: 5
       start_period: 15s
+    networks:
+      - xemarify
+
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy
+      manager:
+        condition: service_healthy
+    ports:
+      - "${HTTP_PORT}:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/api/health >/dev/null"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
     networks:
       - xemarify
 
@@ -303,9 +379,9 @@ COMPOSE
 
 setup_firewall() {
   if command -v ufw >/dev/null 2>&1; then
-    log "Opening firewall ports ${MANAGER_PORT}, ${WEB_PORT}..."
+    log "Opening firewall ports ${HTTP_PORT}, ${MANAGER_PORT}..."
+    ufw allow "${HTTP_PORT}/tcp" >/dev/null 2>&1 || true
     ufw allow "${MANAGER_PORT}/tcp" >/dev/null 2>&1 || true
-    ufw allow "${WEB_PORT}/tcp" >/dev/null 2>&1 || true
   fi
 }
 
@@ -321,7 +397,7 @@ start_stack() {
   local max_retries=30
 
   while [[ $retries -lt $max_retries ]]; do
-    if docker compose ps manager 2>/dev/null | grep -q "healthy"; then
+    if docker compose ps nginx 2>/dev/null | grep -q "healthy"; then
       break
     fi
     retries=$((retries + 1))
@@ -355,6 +431,7 @@ main() {
   install_docker
   pull_images
   generate_env
+  write_nginx_conf
   write_compose
   setup_firewall
   start_stack

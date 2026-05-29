@@ -110,7 +110,7 @@ export async function refreshSession() {
 		}
 
 		try {
-			const response = await fetch(`${BASE_URL}/auth/refresh`, {
+			const response = await fetch(`${BASE_URL}/api/auth/refresh`, {
 				method: 'POST',
 				headers: {
 					'Content-Type': 'application/json',
@@ -173,7 +173,7 @@ export async function bootstrapSession(force = false) {
 }
 
 export async function login(email: string, password: string) {
-	const response = await fetch(`${BASE_URL}/auth/login`, {
+	const response = await fetch(`${BASE_URL}/api/auth/login`, {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json',
@@ -199,7 +199,7 @@ export async function logout(options?: { remote?: boolean }) {
 						? await refreshSession()
 						: null
 			if (token) {
-				await fetch(`${BASE_URL}/auth/logout`, {
+				await fetch(`${BASE_URL}/api/auth/logout`, {
 					method: 'POST',
 					headers: {
 						Authorization: `Bearer ${token}`,

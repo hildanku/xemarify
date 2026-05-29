@@ -42,7 +42,7 @@ export async function bootstrapSystemState(force = false) {
 	if (bootstrapPromise && !force) return bootstrapPromise
 
 	bootstrapPromise = (async () => {
-		const response = await fetch(`${BASE_URL}/health`)
+		const response = await fetch(`${BASE_URL}/api/health`)
 		if (!response.ok) {
 			throw new Error(`Failed to load system status (${response.status})`)
 		}
@@ -69,7 +69,7 @@ export async function initializeFirstManager(input: {
 	password: string
 	setupToken: string
 }) {
-	const response = await fetch(`${BASE_URL}/setup/initialize`, {
+	const response = await fetch(`${BASE_URL}/api/setup/initialize`, {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json',

@@ -123,7 +123,9 @@ func main() {
 	}))
 
 	// Public endpoints
-	router.GET("/health", func(c *gin.Context) {
+	api := router.Group("/api")
+
+	api.GET("/health", func(c *gin.Context) {
 		initialized, err := setupSvc.IsInitialized(c.Request.Context())
 		if err != nil {
 			log.WithError(err).Error("failed to determine setup status")
@@ -133,24 +135,24 @@ func main() {
 
 		c.JSON(http.StatusOK, gin.H{"status": "ok", "initialized": initialized})
 	})
-	router.GET("/metrics", gin.WrapH(promhttp.Handler()))
-	setupGroup := router.Group("/setup")
+	api.GET("/metrics", gin.WrapH(promhttp.Handler()))
+	setupGroup := api.Group("/setup")
 	setupHandle := setupHandler.NewSetupHandler(setupSvc, log)
 	setupHandle.Register(setupGroup)
 
 	// Auth routes (public)
-	authGroup := router.Group("/auth")
+	authGroup := api.Group("/auth")
 	authHandle := authHandler.NewAuthHandler(authSvc, log)
 	authHandle.Register(authGroup)
 
 	// Auth logout requires JWT
-	authProtected := router.Group("/auth")
+	authProtected := api.Group("/auth")
 	authProtected.Use(middleware.UserAuth(cfg.JWT))
 	authHandle.RegisterProtected(authProtected)
 
 	// Agent API v1
 	rateCfg := middleware.DefaultRateLimiterConfig()
-	apiV1 := router.Group("/api/v1")
+	apiV1 := api.Group("/v1")
 
 	agentPublicGroup := apiV1.Group("/agents")
 	agentHandle.RegisterAgentPublic(agentPublicGroup)
@@ -167,7 +169,7 @@ func main() {
 	evtHandler.Register(eventIngestGroup)
 
 	// Manaager API v1 (jwt+rbac)
-	managerV1 := router.Group("/api/v1")
+	managerV1 := api.Group("/v1")
 	managerV1.Use(middleware.UserAuth(cfg.JWT))
 
 	// Users - Manager only
@@ -199,7 +201,7 @@ func main() {
 	evtHandler.RegisterManager(eventsGroup)
 
 	// Events SSE stream - separate group with query-param auth for EventSource compatibility
-	eventsStreamGroup := router.Group("/api/v1/events")
+	eventsStreamGroup := api.Group("/v1/events")
 	eventsStreamGroup.Use(middleware.UserAuthSSE(cfg.JWT))
 	eventsStreamGroup.Use(middleware.RequireRole(userDomain.RoleManager, userDomain.RoleAnalyst))
 	evtHandler.RegisterStream(eventsStreamGroup)

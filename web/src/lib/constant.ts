@@ -1,4 +1,9 @@
-export const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8089'
+/**
+ * Base URL for browser API calls.
+ * In production with nginx reverse proxy, this is empty (relative paths).
+ * In development, points to the local manager instance.
+ */
+export const BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
 
 export const ACCESS_TOKEN_KEY = 'access_token'
 export const REFRESH_TOKEN_KEY = 'refresh_token'
