@@ -1,13 +1,12 @@
 <script lang="ts">
 	import { page } from '$app/state'
-	import { BASE_URL } from '$lib/constant'
 	import { Button } from '$lib/components/ui/button/index.js'
 	import * as Card from '$lib/components/ui/card/index.js'
 	import { Badge } from '$lib/components/ui/badge/index.js'
 
 	const managerEndpoint = $derived.by(() => {
 		const endpoint = page.url.searchParams.get('endpoint')?.trim()
-		return endpoint || BASE_URL || 'https://manager.example.com'
+		return endpoint || 'https://manager.example.com'
 	})
 
 	const enrollmentToken = $derived.by(() => {
