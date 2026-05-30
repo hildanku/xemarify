@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -135,6 +136,142 @@ func (s *EventService) normalize(e *domain.Event) {
 	if _, ok := e.Normalized["facility"]; !ok && e.Facility != "" {
 		e.Normalized["facility"] = e.Facility
 	}
+
+	ensureEventType(e)
+}
+
+func ensureEventType(e *domain.Event) {
+	if e == nil || e.Normalized == nil {
+		return
+	}
+	if _, ok := e.Normalized["event_type"]; ok {
+		return
+	}
+	eventType := deriveEventType(e)
+	if eventType == "" {
+		return
+	}
+	e.Normalized["event_type"] = eventType
+}
+
+func deriveEventType(e *domain.Event) string {
+	if e == nil {
+		return ""
+	}
+
+	if statusValue, ok := normalizedString(e.Normalized, "status"); ok {
+		if eventType := mapHTTPStatus(statusValue); eventType != "" {
+			return eventType
+		}
+	}
+	if statusValue, ok := normalizedString(e.Normalized, "http_status"); ok {
+		if eventType := mapHTTPStatus(statusValue); eventType != "" {
+			return eventType
+		}
+	}
+
+	message := strings.ToLower(strings.TrimSpace(e.Message))
+	raw := strings.ToLower(strings.TrimSpace(e.Raw))
+	combined := strings.TrimSpace(strings.Join([]string{message, raw}, " "))
+
+	if strings.Contains(combined, "sudo") && (strings.Contains(combined, "authentication failure") || strings.Contains(combined, "incorrect password")) {
+		return "sudo_failed"
+	}
+	if strings.Contains(combined, "sudo") && (strings.Contains(combined, "session opened") || strings.Contains(combined, "command=") || strings.Contains(combined, "sudo:")) {
+		return "sudo_used"
+	}
+	if strings.Contains(combined, "invalid user") {
+		return "ssh_invalid_user"
+	}
+	if strings.Contains(combined, "failed password") || strings.Contains(combined, "authentication failure") || strings.Contains(combined, "login failed") {
+		return "login_failed"
+	}
+	if strings.Contains(combined, "accepted password") || strings.Contains(combined, "login success") || strings.Contains(combined, "login succeeded") {
+		return "login_success"
+	}
+	if strings.Contains(combined, "privilege escalation") || strings.Contains(combined, "elevated privileges") {
+		return "privilege_escalation"
+	}
+	if strings.Contains(combined, "port scan") || strings.Contains(combined, "nmap") {
+		return "port_scan_detected"
+	}
+	if strings.Contains(combined, "suspicious process") || strings.Contains(combined, "process exec") || strings.Contains(combined, "malware") {
+		return "process_exec_suspicious"
+	}
+	if strings.Contains(combined, "service installed") || strings.Contains(combined, "apt install") || strings.Contains(combined, "yum install") {
+		return "service_installed"
+	}
+	if strings.Contains(combined, "service started") || strings.Contains(combined, "systemd started") {
+		return "service_started"
+	}
+	if strings.Contains(combined, "useradd") || strings.Contains(combined, "user created") {
+		return "user_created"
+	}
+	if strings.Contains(combined, "file integrity") || strings.Contains(combined, "integrity violation") {
+		return "file_integrity_changed"
+	}
+
+	if eventType := mapHTTPStatus(combined); eventType != "" {
+		return eventType
+	}
+	if strings.Contains(combined, "web login failed") || strings.Contains(combined, "invalid credentials") {
+		return "web_login_failed"
+	}
+	if strings.Contains(combined, "web login success") || strings.Contains(combined, "login successful") {
+		return "web_login_success"
+	}
+
+	if actionValue, ok := normalizedString(e.Normalized, "action"); ok {
+		if actionValue == "login" {
+			return "login_success"
+		}
+	}
+
+	return ""
+}
+
+func normalizedString(values map[string]interface{}, key string) (string, bool) {
+	if values == nil {
+		return "", false
+	}
+	raw, ok := values[key]
+	if !ok || raw == nil {
+		return "", false
+	}
+	switch v := raw.(type) {
+	case string:
+		value := strings.TrimSpace(strings.ToLower(v))
+		if value == "" {
+			return "", false
+		}
+		return value, true
+	case int:
+		return strings.ToLower(strings.TrimSpace(fmt.Sprintf("%d", v))), true
+	case int32:
+		return strings.ToLower(strings.TrimSpace(fmt.Sprintf("%d", v))), true
+	case int64:
+		return strings.ToLower(strings.TrimSpace(fmt.Sprintf("%d", v))), true
+	case float64:
+		return strings.ToLower(strings.TrimSpace(fmt.Sprintf("%.0f", v))), true
+	default:
+		return "", false
+	}
+}
+
+func mapHTTPStatus(value string) string {
+	if value == "" {
+		return ""
+	}
+	if strings.Contains(value, "401") {
+		return "web_401"
+	}
+	if strings.Contains(value, "403") {
+		return "web_403"
+	}
+	if strings.Contains(value, "500") {
+		return "web_500"
+	}
+	return ""
 }
 
 // List returns a filtered, sorted, paginated slice of events and the total
