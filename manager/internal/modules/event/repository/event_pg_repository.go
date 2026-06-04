@@ -68,6 +68,56 @@ func (r *pgEventRepository) Insert(ctx context.Context, e *domain.Event) error {
 	return err
 }
 
+func (r *pgEventRepository) BatchInsert(ctx context.Context, events []*domain.Event) error {
+	if len(events) == 0 {
+		return nil
+	}
+
+	rows := make([][]any, len(events))
+	for i, e := range events {
+		normalizedJSON, err := json.Marshal(e.Normalized)
+		if err != nil {
+			return fmt.Errorf("marshal normalized for event %s: %w", e.ID, err)
+		}
+
+		var sourceIP *string
+		if e.SourceIP != "" {
+			sourceIP = &e.SourceIP
+		}
+
+		rows[i] = []any{
+			e.ID,
+			e.EventTime,
+			e.ReceivedAt,
+			e.AgentID,
+			e.Hostname,
+			sourceIP,
+			e.InputType,
+			e.Facility,
+			e.Severity,
+			e.Category,
+			e.Message,
+			normalizedJSON,
+			e.Raw,
+			time.Now().UTC(),
+		}
+	}
+
+	_, err := r.db.CopyFrom(
+		ctx,
+		pgx.Identifier{"events"},
+		[]string{
+			"id", "event_time", "received_at",
+			"agent_id", "hostname", "source_ip", "input_type",
+			"facility", "severity", "category",
+			"message", "normalized", "raw",
+			"created_at",
+		},
+		pgx.CopyFromRows(rows),
+	)
+	return err
+}
+
 func (r *pgEventRepository) List(ctx context.Context, f ListFilter) ([]*domain.Event, int, error) {
 	allowedCols := map[string]string{
 		"received_at": "received_at",

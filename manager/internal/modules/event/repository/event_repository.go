@@ -41,6 +41,9 @@ type EventRepository interface {
 	// Insert persists a single event into the partitioned events table.
 	Insert(ctx context.Context, event *domain.Event) error
 
+	// BatchInsert persists multiple events in a single round-trip using COPY.
+	BatchInsert(ctx context.Context, events []*domain.Event) error
+
 	// List returns a filtered, sorted, paginated slice of events together
 	// with the total count matching the filter (ignoring limit/offset).
 	List(ctx context.Context, filter ListFilter) ([]*domain.Event, int, error)

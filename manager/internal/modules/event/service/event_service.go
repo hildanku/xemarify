@@ -59,7 +59,8 @@ func (s *EventService) IngestBatch(ctx context.Context, authenticatedAgentID uui
 		return 0, ErrAgentIDMismatch
 	}
 
-	accepted := 0
+	// normalize event
+	events := make([]*domain.Event, 0, len(req.Events))
 	for _, item := range req.Events {
 		receivedAt := time.Now().UTC()
 		eventTime := receivedAt
@@ -87,17 +88,19 @@ func (s *EventService) IngestBatch(ctx context.Context, authenticatedAgentID uui
 		}
 
 		s.normalize(event)
+		events = append(events, event)
+	}
 
-		dbStart := time.Now()
-		if err := s.eventRepo.Insert(ctx, event); err != nil {
-			s.log.WithFields(logrus.Fields{
-				"event_id": event.ID,
-				"agent_id": authenticatedAgentID,
-			}).WithError(err).Error("failed to insert event")
-			return accepted, fmt.Errorf("db insert failed: %w", err)
-		}
-		s.metrics.DBInsertLatency.Observe(time.Since(dbStart).Seconds())
+	// batch insert all events in one round-trip
+	dbStart := time.Now()
+	if err := s.eventRepo.BatchInsert(ctx, events); err != nil {
+		s.log.WithField("agent_id", authenticatedAgentID).WithError(err).Error("failed to batch insert events")
+		return 0, fmt.Errorf("db batch insert failed: %w", err)
+	}
+	s.metrics.DBInsertLatency.Observe(time.Since(dbStart).Seconds())
 
+	// engine processing + SSE broadcast per event
+	for _, event := range events {
 		if s.engine != nil {
 			if err := s.engine.ProcessEvent(ctx, event); err != nil {
 				s.log.WithFields(logrus.Fields{
@@ -107,15 +110,12 @@ func (s *EventService) IngestBatch(ctx context.Context, authenticatedAgentID uui
 			}
 		}
 
-		// Broadcast the event to all connected SSE clients.
 		if s.hub != nil {
 			s.hub.Broadcast("new_event", transport.ToEventResponse(event))
 		}
-
-		accepted++
 	}
 
-	return accepted, nil
+	return len(events), nil
 }
 
 // normalize enriches the event's Normalized map with fields from the top-level
