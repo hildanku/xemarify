@@ -19,8 +19,8 @@ import (
 )
 
 const (
-	DefaultEventWorkerCount = 8
-	DefaultEventChanBuffer  = 4096
+	defaultEventWorkerCount = 8
+	defaultEventChanBuffer  = 4096
 )
 
 var ErrAgentIDMismatch = errors.New("agent id mismatch")
@@ -28,15 +28,16 @@ var ErrAgentIDMismatch = errors.New("agent id mismatch")
 var ErrEventNotFound = errors.New("event not found")
 
 type EventService struct {
-	eventRepo eventRepo.EventRepository
-	engine    engine.Engine
-	hub       *sse.Hub
-	metrics   *metrics.Metrics
-	log       *logrus.Logger
+	eventRepo   eventRepo.EventRepository
+	engine      engine.Engine
+	hub         *sse.Hub
+	metrics     *metrics.Metrics
+	log         *logrus.Logger
 
 	eventCh     chan *domain.Event
 	workerWG    sync.WaitGroup
 	workerCount int
+	chanBuffer  int
 }
 
 func NewEventService(
@@ -45,15 +46,25 @@ func NewEventService(
 	hub *sse.Hub,
 	m *metrics.Metrics,
 	log *logrus.Logger,
+	workerCount int,
+	chanBuffer int,
 ) *EventService {
+	if workerCount <= 0 {
+		workerCount = defaultEventWorkerCount
+	}
+	if chanBuffer <= 0 {
+		chanBuffer = defaultEventChanBuffer
+	}
+
 	return &EventService{
 		eventRepo:   eventRepo,
 		engine:      detectionEngine,
 		hub:         hub,
 		metrics:     m,
 		log:         log,
-		eventCh:     make(chan *domain.Event, DefaultEventChanBuffer),
-		workerCount: DefaultEventWorkerCount,
+		eventCh:     make(chan *domain.Event, chanBuffer),
+		workerCount: workerCount,
+		chanBuffer:  chanBuffer,
 	}
 }
 

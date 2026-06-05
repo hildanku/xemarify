@@ -14,6 +14,7 @@ type AppConfig struct {
 	Server   ServerConfig
 	JWT      JWTConfig
 	Setup    SetupConfig
+	Event    EventConfig
 	LogLevel string
 }
 
@@ -42,6 +43,11 @@ type DatabaseConfig struct {
 type ServerConfig struct {
 	Host string
 	Port int
+}
+
+type EventConfig struct {
+	WorkerCount int
+	ChanBuffer  int
 }
 
 func Load() (*AppConfig, error) {
@@ -82,6 +88,10 @@ func Load() (*AppConfig, error) {
 		Setup: SetupConfig{
 			Token: viper.GetString("MANAGER_SETUP_TOKEN"),
 		},
+		Event: EventConfig{
+			WorkerCount: viper.GetInt("EVENT_WORKER_COUNT"),
+			ChanBuffer:  viper.GetInt("EVENT_CHAN_BUFFER"),
+		},
 		LogLevel: logLevel,
 	}
 	if err := appcfg.Validate(); err != nil {
@@ -109,6 +119,13 @@ func (c *AppConfig) Validate() error {
 
 	if c.JWT.Secret == "" {
 		return fmt.Errorf("JWT secret is required (JWT_SECRET)")
+	}
+
+	if c.Event.WorkerCount <= 0 {
+		c.Event.WorkerCount = 8
+	}
+	if c.Event.ChanBuffer <= 0 {
+		c.Event.ChanBuffer = 4096
 	}
 
 	return nil
