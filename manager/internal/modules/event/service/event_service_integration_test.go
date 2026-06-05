@@ -112,7 +112,7 @@ func TestEventIngestTriggersAlertIntegration(t *testing.T) {
 	}
 
 	eventRepository := eventRepo.NewPgEventRepository(pool)
-	eventService := NewEventService(eventRepository, ruleEngine, nil, metrics, logger)
+	eventService := NewEventService(eventRepository, ruleEngine, nil, metrics, logger, 8, 4096)
 
 	agentID := uuid.New()
 	event := transport.IngestEvent{
@@ -173,7 +173,7 @@ func TestEventDerivationIntegration_NoOverride(t *testing.T) {
 		}),
 	}
 
-	eventService := NewEventService(eventRepository, nil, nil, metrics, logger)
+	eventService := NewEventService(eventRepository, nil, nil, metrics, logger, 8, 4096)
 	agentID := uuid.New()
 	messageMarker := "integration-test-explicit-event-type-" + uuid.New().String()
 
@@ -227,7 +227,7 @@ func TestEventDerivationIntegration_FromNormalizedStatus(t *testing.T) {
 		}),
 	}
 
-	eventService := NewEventService(eventRepository, nil, nil, metrics, logger)
+	eventService := NewEventService(eventRepository, nil, nil, metrics, logger, 8, 4096)
 	agentID := uuid.New()
 	messageMarker := "integration-test-normalized-status-" + uuid.New().String()
 

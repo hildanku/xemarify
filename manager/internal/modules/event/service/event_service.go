@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -17,35 +18,85 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+const (
+	defaultEventWorkerCount = 8
+	defaultEventChanBuffer  = 4096
+)
+
 var ErrAgentIDMismatch = errors.New("agent id mismatch")
 
 var ErrEventNotFound = errors.New("event not found")
 
-// EventService orchestrates event validation, normalization, and persistence.
-// It owns a single public method - Ingest - which is the intake point for the
-// ingestion pipeline.  All steps are synchronous (Phase 1 design decision).
 type EventService struct {
-	eventRepo eventRepo.EventRepository
-	engine    engine.Engine
-	hub       *sse.Hub
-	metrics   *metrics.Metrics
-	log       *logrus.Logger
+	eventRepo   eventRepo.EventRepository
+	engine      engine.Engine
+	hub         *sse.Hub
+	metrics     *metrics.Metrics
+	log         *logrus.Logger
+
+	eventCh     chan *domain.Event
+	workerWG    sync.WaitGroup
+	workerCount int
+	chanBuffer  int
 }
 
-// NewEventService constructs the service with its required dependencies.
 func NewEventService(
 	eventRepo eventRepo.EventRepository,
 	detectionEngine engine.Engine,
 	hub *sse.Hub,
 	m *metrics.Metrics,
 	log *logrus.Logger,
+	workerCount int,
+	chanBuffer int,
 ) *EventService {
+	if workerCount <= 0 {
+		workerCount = defaultEventWorkerCount
+	}
+	if chanBuffer <= 0 {
+		chanBuffer = defaultEventChanBuffer
+	}
+
 	return &EventService{
-		eventRepo: eventRepo,
-		engine:    detectionEngine,
-		hub:       hub,
-		metrics:   m,
-		log:       log,
+		eventRepo:   eventRepo,
+		engine:      detectionEngine,
+		hub:         hub,
+		metrics:     m,
+		log:         log,
+		eventCh:     make(chan *domain.Event, chanBuffer),
+		workerCount: workerCount,
+		chanBuffer:  chanBuffer,
+	}
+}
+
+func (s *EventService) Start() {
+	for i := 0; i < s.workerCount; i++ {
+		s.workerWG.Add(1)
+		go s.processLoop()
+	}
+	s.log.WithField("worker_count", s.workerCount).Info("event processing workers started")
+}
+
+func (s *EventService) Stop() {
+	close(s.eventCh)
+	s.workerWG.Wait()
+	s.log.Info("event processing workers stopped, channel drained")
+}
+
+func (s *EventService) processLoop() {
+	defer s.workerWG.Done()
+	for event := range s.eventCh {
+		ctx := context.Background()
+		if s.engine != nil {
+			if err := s.engine.ProcessEvent(ctx, event); err != nil {
+				s.log.WithFields(logrus.Fields{
+					"event_id": event.ID,
+					"agent_id": event.AgentID,
+				}).WithError(err).Warn("rule engine processing failed")
+			}
+		}
+		if s.hub != nil {
+			s.hub.Broadcast("new_event", transport.ToEventResponse(event))
+		}
 	}
 }
 
@@ -59,7 +110,8 @@ func (s *EventService) IngestBatch(ctx context.Context, authenticatedAgentID uui
 		return 0, ErrAgentIDMismatch
 	}
 
-	accepted := 0
+	// normalize event
+	events := make([]*domain.Event, 0, len(req.Events))
 	for _, item := range req.Events {
 		receivedAt := time.Now().UTC()
 		eventTime := receivedAt
@@ -87,35 +139,26 @@ func (s *EventService) IngestBatch(ctx context.Context, authenticatedAgentID uui
 		}
 
 		s.normalize(event)
-
-		dbStart := time.Now()
-		if err := s.eventRepo.Insert(ctx, event); err != nil {
-			s.log.WithFields(logrus.Fields{
-				"event_id": event.ID,
-				"agent_id": authenticatedAgentID,
-			}).WithError(err).Error("failed to insert event")
-			return accepted, fmt.Errorf("db insert failed: %w", err)
-		}
-		s.metrics.DBInsertLatency.Observe(time.Since(dbStart).Seconds())
-
-		if s.engine != nil {
-			if err := s.engine.ProcessEvent(ctx, event); err != nil {
-				s.log.WithFields(logrus.Fields{
-					"event_id": event.ID,
-					"agent_id": authenticatedAgentID,
-				}).WithError(err).Warn("rule engine processing failed")
-			}
-		}
-
-		// Broadcast the event to all connected SSE clients.
-		if s.hub != nil {
-			s.hub.Broadcast("new_event", transport.ToEventResponse(event))
-		}
-
-		accepted++
+		events = append(events, event)
 	}
 
-	return accepted, nil
+	dbStart := time.Now()
+	if err := s.eventRepo.BatchInsert(ctx, events); err != nil {
+		s.log.WithField("agent_id", authenticatedAgentID).WithError(err).Error("failed to batch insert events")
+		return 0, fmt.Errorf("db batch insert failed: %w", err)
+	}
+	s.metrics.DBInsertLatency.Observe(time.Since(dbStart).Seconds())
+
+	for _, event := range events {
+		select {
+		case s.eventCh <- event:
+		default:
+			s.metrics.EventsFailed.WithLabelValues("channel_full").Inc()
+			s.log.WithField("event_id", event.ID).Warn("event processing channel full, event will not be processed by rule engine")
+		}
+	}
+
+	return len(events), nil
 }
 
 // normalize enriches the event's Normalized map with fields from the top-level
