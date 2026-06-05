@@ -7,13 +7,13 @@
 #
 #   # With specific version:
 #   curl -fsSL https://raw.githubusercontent.com/hildanku/xemarify/main/deploy/agent/install.sh | \
-#     sudo MANAGER_ENDPOINT=http://<ip>:8089 ENROLLMENT_TOKEN=<token> VERSION=v1.1.0-beta bash
+#     sudo MANAGER_ENDPOINT=http://<ip>:8089 ENROLLMENT_TOKEN=<token> VERSION=v1.2.0-beta bash
 #
 # Tested on: Ubuntu 22.04 LTS
 # ============================================================
 set -euo pipefail
 
-VERSION="${VERSION:-v1.1.0-beta}"
+VERSION="${VERSION:-v1.2.0-beta}"
 ARCH="${ARCH:-$(dpkg --print-architecture 2>/dev/null || echo amd64)}"
 MANAGER_ENDPOINT="${MANAGER_ENDPOINT:-}"
 ENROLLMENT_TOKEN="${ENROLLMENT_TOKEN:-}"

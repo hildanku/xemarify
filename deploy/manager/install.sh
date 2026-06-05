@@ -3,14 +3,15 @@
 # Xemarify Manager - One-liner Installer
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/hildanku/xemarify/main/deploy/manager/install.sh | sudo bash
-#   curl -fsSL https://raw.githubusercontent.com/hildanku/xemarify/main/deploy/manager/install.sh | sudo MANAGER_VERSION=v1.2.0-beta WEB_VERSION=v1.2.0-beta bash
+#   curl -fsSL https://raw.githubusercontent.com/hildanku/xemarify/main/deploy/manager/install.sh | sudo VERSION=1.3.0-beta bash
 #
 # Tested on: Ubuntu 22.04 LTS
 # ============================================================
 set -euo pipefail
 
-MANAGER_VERSION="${MANAGER_VERSION:-latest}"
-WEB_VERSION="${WEB_VERSION:-latest}"
+VERSION="${VERSION:-latest}"
+MANAGER_VERSION="${MANAGER_VERSION:-${VERSION}}"
+WEB_VERSION="${WEB_VERSION:-${VERSION}}"
 MANAGER_PORT="${MANAGER_PORT:-8089}"
 HTTP_PORT="${HTTP_PORT:-80}"
 INSTALL_DIR="${INSTALL_DIR:-/opt/xemarify}"
@@ -155,6 +156,9 @@ JWT_ACCESS_TTL=15m
 JWT_REFRESH_TTL=168h
 
 MANAGER_SETUP_TOKEN=${SETUP_TOKEN}
+
+EVENT_WORKER_COUNT=4
+EVENT_CHAN_BUFFER=1024
 EOF
 
   chmod 600 "${MANAGER_ENV}"
