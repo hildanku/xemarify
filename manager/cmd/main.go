@@ -95,6 +95,8 @@ func main() {
 	defer ruleEngine.Stop()
 
 	evtService := eventService.NewEventService(eventRepository, ruleEngine, eventHub, m, log)
+	evtService.Start()
+	defer evtService.Stop()
 	authSvc := authService.NewAuthService(userRepository, authRepository, auditLogService, cfg.JWT, log)
 	setupSvc := setupService.NewSetupService(db, cfg.JWT, cfg.Setup.Token, log)
 	userSvc := userService.NewUserService(db, userRepository, auditLogService, log)
