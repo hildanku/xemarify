@@ -41,19 +41,19 @@ type EventDetailResponse struct {
 	Raw        string                 `json:"raw,omitempty"`
 }
 
-// ListEventsMetadata carries pagination and count info for a list response.
+// ListEventsMetadata carries pagination info for a list response.
+// COUNT(*) and total_pages have been removed to eliminate full-partition scans.
+// Clients should paginate by passing the next_cursor value on subsequent requests.
 type ListEventsMetadata struct {
-	// Total is the count of matching events within the requested date window.
-	Total int `json:"total"`
+	// NextCursor is the opaque token to pass as ?cursor= on the next request.
+	// An empty string means this is the last page.
+	NextCursor string `json:"next_cursor"`
 
-	// TotalPages is derived from total and limit.
-	TotalPages int `json:"total_pages"`
+	// HasMore is a convenience boolean derived from NextCursor.
+	HasMore bool `json:"has_more"`
 
 	// Limit is the page size that was applied.
 	Limit int `json:"limit"`
-
-	// Offset is the number of rows skipped.
-	Offset int `json:"offset"`
 }
 
 // ListEventsResponse wraps a paginated slice of events and pagination metadata.

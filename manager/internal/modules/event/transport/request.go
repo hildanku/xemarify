@@ -37,8 +37,11 @@ type ListEventsQuery struct {
 	// Limit is the maximum number of rows to return (1-100).
 	Limit int `form:"limit,default=10" binding:"omitempty,min=1,max=100"`
 
-	// Offset is the number of rows to skip.
-	Offset int `form:"offset,default=0" binding:"omitempty,min=0"`
+	// Cursor is the opaque pagination token from the previous response's
+	// next_cursor field. Omit or leave empty to fetch the first page.
+	// OFFSET-based pagination has been removed in favour of this keyset approach
+	// to eliminate full-partition scans on the partitioned events table.
+	Cursor string `form:"cursor"`
 
 	// DateFrom restricts results to events received on or after this time.
 	// Defaults to NOW()-30d server-side. Drives partition pruning.

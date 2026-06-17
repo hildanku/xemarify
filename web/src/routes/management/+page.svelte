@@ -1,6 +1,10 @@
 <script lang="ts">
 	import { createQuery } from '@tanstack/svelte-query'
-	import { clientFetch, type ApiResponseWithMetadata } from '$lib/client'
+	import {
+		clientFetch,
+		type ApiResponseWithMetadata,
+		type ApiResponseWithCursorMetadata,
+	} from '$lib/client'
 	import { V1_BASE_URL } from '$lib/constant'
 	import {
 		REALTIME_INTERVAL_MS,
@@ -55,37 +59,33 @@
 		},
 	} satisfies Chart.ChartConfig
 
-	const eventsSummaryQuery = createQuery<ApiResponseWithMetadata<EventItem[]>>(() => ({
-		queryKey: ['dashboard', 'events-summary'],
-		queryFn: () =>
-			clientFetch<ApiResponseWithMetadata<EventItem[]>>(
-				`${V1_BASE_URL}/events?limit=1&offset=0&sort_by=received_at&order=desc`,
-				{ method: 'GET' },
-			),
-		...realtimeQueryOptions(),
-	}))
+	const alertsSummaryQuery = createQuery<ApiResponseWithMetadata<Alert[]>>(
+		() => ({
+			queryKey: ['dashboard', 'alerts-summary'],
+			queryFn: () =>
+				clientFetch<ApiResponseWithMetadata<Alert[]>>(
+					`${V1_BASE_URL}/alerts?limit=1&offset=0&sort_by=triggered_at&order=desc`,
+					{ method: 'GET' },
+				),
+			...realtimeQueryOptions(),
+		}),
+	)
 
-	const alertsSummaryQuery = createQuery<ApiResponseWithMetadata<Alert[]>>(() => ({
-		queryKey: ['dashboard', 'alerts-summary'],
-		queryFn: () =>
-			clientFetch<ApiResponseWithMetadata<Alert[]>>(
-				`${V1_BASE_URL}/alerts?limit=1&offset=0&sort_by=triggered_at&order=desc`,
-				{ method: 'GET' },
-			),
-		...realtimeQueryOptions(),
-	}))
+	const newAlertsSummaryQuery = createQuery<ApiResponseWithMetadata<Alert[]>>(
+		() => ({
+			queryKey: ['dashboard', 'alerts-summary', 'new'],
+			queryFn: () =>
+				clientFetch<ApiResponseWithMetadata<Alert[]>>(
+					`${V1_BASE_URL}/alerts?limit=1&offset=0&sort_by=triggered_at&order=desc&status=new`,
+					{ method: 'GET' },
+				),
+			...realtimeQueryOptions(),
+		}),
+	)
 
-	const newAlertsSummaryQuery = createQuery<ApiResponseWithMetadata<Alert[]>>(() => ({
-		queryKey: ['dashboard', 'alerts-summary', 'new'],
-		queryFn: () =>
-			clientFetch<ApiResponseWithMetadata<Alert[]>>(
-				`${V1_BASE_URL}/alerts?limit=1&offset=0&sort_by=triggered_at&order=desc&status=new`,
-				{ method: 'GET' },
-			),
-		...realtimeQueryOptions(),
-	}))
-
-	const auditLogsSummaryQuery = createQuery<ApiResponseWithMetadata<AuditLog[]>>(() => ({
+	const auditLogsSummaryQuery = createQuery<
+		ApiResponseWithMetadata<AuditLog[]>
+	>(() => ({
 		queryKey: ['dashboard', 'audit-logs-summary'],
 		queryFn: () =>
 			clientFetch<ApiResponseWithMetadata<AuditLog[]>>(
@@ -105,50 +105,77 @@
 		...realtimeQueryOptions(),
 	}))
 
-	const eventsSampleQuery = createQuery<ApiResponseWithMetadata<EventItem[]>>(() => ({
+	const eventsSampleQuery = createQuery<
+		ApiResponseWithCursorMetadata<EventItem[]>
+	>(() => ({
 		queryKey: ['dashboard', 'events-sample'],
 		queryFn: () =>
-			clientFetch<ApiResponseWithMetadata<EventItem[]>>(
-				`${V1_BASE_URL}/events?limit=80&offset=0&sort_by=received_at&order=desc`,
+			clientFetch<ApiResponseWithCursorMetadata<EventItem[]>>(
+				`${V1_BASE_URL}/events?limit=80&order=desc`,
 				{ method: 'GET' },
 			),
 		...realtimeQueryOptions(),
 	}))
 
-	const alertsSampleQuery = createQuery<ApiResponseWithMetadata<Alert[]>>(() => ({
-		queryKey: ['dashboard', 'alerts-sample'],
-		queryFn: () =>
-			clientFetch<ApiResponseWithMetadata<Alert[]>>(
-				`${V1_BASE_URL}/alerts?limit=40&offset=0&sort_by=triggered_at&order=desc`,
-				{ method: 'GET' },
-			),
-		...realtimeQueryOptions(),
-	}))
+	const alertsSampleQuery = createQuery<ApiResponseWithMetadata<Alert[]>>(
+		() => ({
+			queryKey: ['dashboard', 'alerts-sample'],
+			queryFn: () =>
+				clientFetch<ApiResponseWithMetadata<Alert[]>>(
+					`${V1_BASE_URL}/alerts?limit=40&offset=0&sort_by=triggered_at&order=desc`,
+					{ method: 'GET' },
+				),
+			...realtimeQueryOptions(),
+		}),
+	)
 
 	let isRefreshing = $state(false)
 
-	const eventsTotal = $derived(eventsSummaryQuery.data?.data.metadata.total ?? 0)
-	const alertsTotal = $derived(alertsSummaryQuery.data?.data.metadata.total ?? 0)
-	const newAlertsTotal = $derived(newAlertsSummaryQuery.data?.data.metadata.total ?? 0)
-	const auditLogsTotal = $derived(auditLogsSummaryQuery.data?.data.metadata.total ?? 0)
+	const eventsSample = $derived(eventsSampleQuery.data?.data.items ?? [])
+	const eventsHasMore = $derived(
+		eventsSampleQuery.data?.data.metadata.has_more ?? false,
+	)
+	const eventsTotal = $derived(
+		eventsSample.length > 0
+			? eventsHasMore
+				? eventsSample.length
+				: eventsSample.length
+			: 0,
+	)
+	const alertsTotal = $derived(
+		alertsSummaryQuery.data?.data.metadata.total ?? 0,
+	)
+	const newAlertsTotal = $derived(
+		newAlertsSummaryQuery.data?.data.metadata.total ?? 0,
+	)
+	const auditLogsTotal = $derived(
+		auditLogsSummaryQuery.data?.data.metadata.total ?? 0,
+	)
 	const agents = $derived(agentsQuery.data?.data.items ?? [])
-	const totalAgents = $derived(agentsQuery.data?.data.metadata.total ?? agents.length)
-	const onlineAgents = $derived(agents.filter((agent) => agent.status === 'ONLINE').length)
+	const totalAgents = $derived(
+		agentsQuery.data?.data.metadata.total ?? agents.length,
+	)
+	const onlineAgents = $derived(
+		agents.filter((agent) => agent.status === 'ONLINE').length,
+	)
 	const agentCoverage = $derived(
 		totalAgents > 0 ? Math.round((onlineAgents / totalAgents) * 100) : 0,
 	)
-	const eventsSample = $derived(eventsSampleQuery.data?.data.items ?? [])
 	const alertsSample = $derived(alertsSampleQuery.data?.data.items ?? [])
 	const recentCriticalAlerts = $derived(
 		alertsSample
-			.filter((alert) => alert.severity === 'CRITICAL' || alert.severity === 'HIGH')
+			.filter(
+				(alert) => alert.severity === 'CRITICAL' || alert.severity === 'HIGH',
+			)
 			.slice(0, 5),
 	)
 	const metrics = $derived<DashboardMetric[]>([
 		{
 			label: 'Total Events',
-			value: formatNumber(eventsTotal),
-			description: 'Ingested events',
+			value: eventsHasMore
+				? `${formatNumber(eventsTotal)}+`
+				: formatNumber(eventsTotal),
+			description: 'Ingested events (recent sample)',
 		},
 		{
 			label: 'Total Alerts',
@@ -170,7 +197,6 @@
 	const statusData = $derived(buildStatusData(alertsSample))
 	const latestUpdateTimestamp = $derived(
 		Math.max(
-			eventsSummaryQuery.dataUpdatedAt ?? 0,
 			alertsSummaryQuery.dataUpdatedAt ?? 0,
 			newAlertsSummaryQuery.dataUpdatedAt ?? 0,
 			auditLogsSummaryQuery.dataUpdatedAt ?? 0,
@@ -183,7 +209,6 @@
 	async function refreshDashboard() {
 		isRefreshing = true
 		await Promise.allSettled([
-			eventsSummaryQuery.refetch(),
 			alertsSummaryQuery.refetch(),
 			newAlertsSummaryQuery.refetch(),
 			auditLogsSummaryQuery.refetch(),

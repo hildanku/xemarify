@@ -28,11 +28,11 @@ var ErrAgentIDMismatch = errors.New("agent id mismatch")
 var ErrEventNotFound = errors.New("event not found")
 
 type EventService struct {
-	eventRepo   eventRepo.EventRepository
-	engine      engine.Engine
-	hub         *sse.Hub
-	metrics     *metrics.Metrics
-	log         *logrus.Logger
+	eventRepo eventRepo.EventRepository
+	engine    engine.Engine
+	hub       *sse.Hub
+	metrics   *metrics.Metrics
+	log       *logrus.Logger
 
 	eventCh     chan *domain.Event
 	workerWG    sync.WaitGroup
@@ -319,7 +319,7 @@ func mapHTTPStatus(value string) string {
 
 // List returns a filtered, sorted, paginated slice of events and the total
 // match count within the requested date window.
-func (s *EventService) List(ctx context.Context, filter eventRepo.ListFilter) ([]*domain.Event, int, error) {
+func (s *EventService) List(ctx context.Context, filter eventRepo.ListFilter) ([]*domain.Event, string, error) {
 	return s.eventRepo.List(ctx, filter)
 }
 

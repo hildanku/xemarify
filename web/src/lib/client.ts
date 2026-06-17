@@ -2,21 +2,34 @@ import { refreshSession } from '$lib/auth/session'
 import { isTokenExpired, readTokens } from '$lib/auth/token'
 
 export interface ApiResponse<T> {
-    message: string
-    data: T
+	message: string
+	data: T
 }
 
 export interface ApiResponseWithMetadata<T> {
-    message: string
-    data: {
-        items: T,
-        metadata: {
-            total: number
-            total_pages: number
-            limit: number
-            offset: number
-        }
-    }
+	message: string
+	data: {
+		items: T
+		metadata: {
+			total: number
+			total_pages: number
+			limit: number
+			offset: number
+		}
+	}
+}
+
+/** Cursor-based (keyset) pagination response, this interface used by the events endpoint. */
+export interface ApiResponseWithCursorMetadata<T> {
+	message: string
+	data: {
+		items: T
+		metadata: {
+			next_cursor: string
+			has_more: boolean
+			limit: number
+		}
+	}
 }
 
 async function parseError(response: Response) {
@@ -48,9 +61,13 @@ async function ensureValidAccessToken() {
     return refreshSession()
 }
 
-export async function clientFetch<T>(url: string, options?: RequestInit, config?: { auth?: boolean }): Promise<T> {
-    const headers = new Headers(options?.headers)
-    const useAuth = config?.auth !== false
+export async function clientFetch<T>(
+	url: string,
+	options?: RequestInit,
+	config?: { auth?: boolean },
+): Promise<T> {
+	const headers = new Headers(options?.headers)
+	const useAuth = config?.auth !== false
 
     if (useAuth) {
         const token = await ensureValidAccessToken()
@@ -79,10 +96,12 @@ export async function clientFetch<T>(url: string, options?: RequestInit, config?
         }
     }
 
-    if (!response.ok) {
-        const errorText = await parseError(response)
-        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`)
-    }
+	if (!response.ok) {
+		const errorText = await parseError(response)
+		throw new Error(
+			`HTTP error! status: ${response.status}, message: ${errorText}`,
+		)
+	}
 
     if (response.status === 204) {
         return undefined as T
