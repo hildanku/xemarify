@@ -2,7 +2,11 @@
 	import { resolve } from '$app/paths'
 	import { page } from '$app/stores'
 	import { createQuery, useQueryClient } from '@tanstack/svelte-query'
-	import { clientFetch, type ApiResponse, type ApiResponseWithMetadata } from '$lib/client'
+	import {
+		clientFetch,
+		type ApiResponse,
+		type ApiResponseWithCursorMetadata,
+	} from '$lib/client'
 	import { V1_BASE_URL, type TableParams } from '$lib/constant'
 	import {
 		parseTableParams,
@@ -11,7 +15,6 @@
 	} from '$lib/utils/table-params'
 	import type { EventDetail, EventItem } from '$lib/types/api'
 	import Loading from '$lib/components/ui/custom/loading.svelte'
-	import Pagination from '$lib/components/ui/custom/pagination.svelte'
 	import LimitSelect from '$lib/components/ui/custom/limit-select.svelte'
 	import EventsDataTable from '$lib/components/table/events/events-table.svelte'
 	import { Button } from '$lib/components/ui/button/index.js'
@@ -20,11 +23,16 @@
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js'
 	import * as Dialog from '$lib/components/ui/dialog/index.js'
 	import SearchIcon from '@lucide/svelte/icons/search'
+	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left'
+	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right'
 	import CalendarIcon from '@lucide/svelte/icons/calendar'
 	import { createEventSource } from '$lib/utils/event-source'
-	import { buildInvestigationHref, toEventTimeline } from '$lib/utils/investigation'
+	import {
+		buildInvestigationHref,
+		toEventTimeline,
+	} from '$lib/utils/investigation'
 
-	type EventPageParams = TableParams & {
+	type EventPageParams = Omit<TableParams, 'page'> & {
 		severity: string
 		category: string
 		agent_id: string
@@ -35,11 +43,39 @@
 	const queryClient = useQueryClient()
 	const tableParams = $derived(parseTableParams($page.url))
 	const params = $derived(parseEventParams($page.url, tableParams))
+	// cursorStack[0] = '' means first page; each subsequent entry is the next_cursor
+	// from the previous page response.
+	let cursorStack = $state<string[]>([''])
+	const currentCursor = $derived(cursorStack[cursorStack.length - 1])
+	const currentPage = $derived(cursorStack.length) // 1-indexed display
+
+	const filterKey = $derived(
+		[
+			params.search,
+			params.severity,
+			params.category,
+			params.agent_id,
+			params.date_from,
+			params.date_to,
+			params.limit,
+			params.order,
+		].join('|'),
+	)
+	let prevFilterKey = $state('')
+	$effect(() => {
+		if (filterKey !== prevFilterKey) {
+			prevFilterKey = filterKey
+			cursorStack = ['']
+		}
+	})
+
 	let dateFrom = $state('')
 	let dateTo = $state('')
 	let selectedEventID = $state<string | null>(null)
 	let detailDialogOpen = $state(false)
-	let sseStatus = $state<'connected' | 'connecting' | 'disconnected'>('disconnected')
+	let sseStatus = $state<'connected' | 'connecting' | 'disconnected'>(
+		'disconnected',
+	)
 
 	$effect(() => {
 		if (!detailDialogOpen) {
@@ -52,15 +88,17 @@
 		dateTo = toDateInputValue(params.date_to)
 	})
 
-	const eventsQuery = createQuery<ApiResponseWithMetadata<EventItem[]>>(() => ({
-		queryKey: ['events', params],
-		queryFn: () =>
-			clientFetch<ApiResponseWithMetadata<EventItem[]>>(
-				`${V1_BASE_URL}/events?${buildEventsQueryString(params)}`,
-				{ method: 'GET' },
-			),
-		refetchOnWindowFocus: true,
-	}))
+	const eventsQuery = createQuery<ApiResponseWithCursorMetadata<EventItem[]>>(
+		() => ({
+			queryKey: ['events', params, currentCursor],
+			queryFn: () =>
+				clientFetch<ApiResponseWithCursorMetadata<EventItem[]>>(
+					`${V1_BASE_URL}/events?${buildEventsQueryString(params, currentCursor)}`,
+					{ method: 'GET' },
+				),
+			refetchOnWindowFocus: true,
+		}),
+	)
 
 	// SSE connection for realtime event updates.
 	let cleanupSSE: (() => void) | undefined
@@ -84,12 +122,16 @@
 
 	const events = $derived(eventsQuery.data?.data.items ?? [])
 	const metadata = $derived(eventsQuery.data?.data.metadata)
-	const totalPages = $derived(metadata?.total_pages ?? 1)
+	const hasMore = $derived(metadata?.has_more ?? false)
 
 	const detailQuery = createQuery<ApiResponse<EventDetail>>(() => ({
 		queryKey: ['event-detail', selectedEventID],
 		enabled: !!selectedEventID,
-		queryFn: () => clientFetch<ApiResponse<EventDetail>>(`${V1_BASE_URL}/events/${selectedEventID}`, { method: 'GET' }),
+		queryFn: () =>
+			clientFetch<ApiResponse<EventDetail>>(
+				`${V1_BASE_URL}/events/${selectedEventID}`,
+				{ method: 'GET' },
+			),
 		refetchOnWindowFocus: true,
 	}))
 
@@ -104,12 +146,11 @@
 		}
 	}
 
-	function buildEventsQueryString(p: EventPageParams): string {
+	function buildEventsQueryString(p: EventPageParams, cursor: string): string {
 		const qs = new URLSearchParams()
 		qs.set('limit', String(p.limit))
-		qs.set('offset', String(Math.max(0, (p.page - 1) * p.limit)))
-		qs.set('sort_by', p.sort)
 		qs.set('order', p.order)
+		if (cursor) qs.set('cursor', cursor)
 		if (p.search) qs.set('search', p.search)
 		if (p.severity) qs.set('severity', p.severity)
 		if (p.category) qs.set('category', p.category)
@@ -119,27 +160,30 @@
 		return qs.toString()
 	}
 
-	function onSortChange(sort: string, order: 'asc' | 'desc') {
-		updateTableParams({ sort, order }, $page.url)
+	function goNext() {
+		const nc = metadata?.next_cursor
+		if (!nc) return
+		cursorStack = [...cursorStack, nc]
 	}
 
-	function gotoPage(nextPage: number) {
-		updateTableParams({ page: nextPage }, $page.url)
+	function goPrev() {
+		if (cursorStack.length <= 1) return
+		cursorStack = cursorStack.slice(0, -1)
 	}
 
 	function handleLimitChange(value: string | undefined) {
 		if (!value) return
-		updateTableParams({ limit: parseInt(value), page: 1 }, $page.url)
+		updateTableParams({ limit: parseInt(value) }, $page.url)
 	}
 
-	function updateExtraParams(next: Partial<Pick<EventPageParams, 'severity' | 'category' | 'agent_id' | 'date_from' | 'date_to'>>) {
-		const resetPage =
-			('severity' in next && next.severity !== params.severity) ||
-			('category' in next && next.category !== params.category) ||
-			('agent_id' in next && next.agent_id !== params.agent_id) ||
-			('date_from' in next && next.date_from !== params.date_from) ||
-			('date_to' in next && next.date_to !== params.date_to)
-
+	function updateExtraParams(
+		next: Partial<
+			Pick<
+				EventPageParams,
+				'severity' | 'category' | 'agent_id' | 'date_from' | 'date_to'
+			>
+		>,
+	) {
 		updateSearchParams(
 			{
 				severity: next.severity,
@@ -149,7 +193,6 @@
 				date_to: next.date_to,
 			},
 			$page.url,
-			{ resetPage },
 		)
 	}
 
@@ -160,7 +203,9 @@
 
 	function fromDateInput(value: string, boundary: 'start' | 'end'): string {
 		if (!value) return ''
-		return boundary === 'start' ? `${value}T00:00:00.000Z` : `${value}T23:59:59.999Z`
+		return boundary === 'start'
+			? `${value}T00:00:00.000Z`
+			: `${value}T23:59:59.999Z`
 	}
 
 	function applyDateRange() {
@@ -181,7 +226,9 @@
 		detailDialogOpen = true
 	}
 
-	function stringifyNormalized(normalized: Record<string, unknown> | undefined): string {
+	function stringifyNormalized(
+		normalized: Record<string, unknown> | undefined,
+	): string {
 		if (!normalized || Object.keys(normalized).length === 0) {
 			return '-'
 		}
@@ -189,22 +236,36 @@
 	}
 
 	function buildAlertsPivotHref(searchValue: string): string {
-		return buildInvestigationHref(resolve('/management/alerts'), $page.url.origin, {
-			search: searchValue,
-		})
+		return buildInvestigationHref(
+			resolve('/management/alerts'),
+			$page.url.origin,
+			{
+				search: searchValue,
+			},
+		)
 	}
 
 	function buildEventsSearchPivotHref(searchValue: string): string {
-		return buildInvestigationHref(resolve('/management/events'), $page.url.origin, {
-			search: searchValue,
-		})
+		return buildInvestigationHref(
+			resolve('/management/events'),
+			$page.url.origin,
+			{
+				search: searchValue,
+			},
+		)
 	}
 
-	function buildEventsFilterPivotHref(next: Partial<Pick<EventPageParams, 'agent_id' | 'category'>>) {
-		return buildInvestigationHref(resolve('/management/events'), $page.url.origin, {
-			agent_id: next.agent_id,
-			category: next.category,
-		})
+	function buildEventsFilterPivotHref(
+		next: Partial<Pick<EventPageParams, 'agent_id' | 'category'>>,
+	) {
+		return buildInvestigationHref(
+			resolve('/management/events'),
+			$page.url.origin,
+			{
+				agent_id: next.agent_id,
+				category: next.category,
+			},
+		)
 	}
 </script>
 
@@ -212,23 +273,37 @@
 	<div class="flex flex-wrap items-center justify-between gap-3">
 		<div>
 			<h1 class="text-3xl font-bold tracking-tight">Events</h1>
-			<p class="text-muted-foreground">Inspect ingested security events from agents</p>
+			<p class="text-muted-foreground">
+				Inspect ingested security events from agents
+			</p>
 		</div>
 	</div>
 
 	<div class="flex flex-wrap items-center gap-2">
 		<div class="relative flex-1 min-w-48 max-w-xs">
-			<SearchIcon class="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+			<SearchIcon
+				class="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none"
+			/>
 			<Input
 				class="pl-9"
 				placeholder="Search events…"
 				value={params.search}
-				oninput={(e) => updateTableParams({ search: (e.target as HTMLInputElement).value }, $page.url)}
+				oninput={(e) =>
+					updateTableParams(
+						{ search: (e.target as HTMLInputElement).value },
+						$page.url,
+					)}
 			/>
 		</div>
 
-		<Select.Root type="single" value={params.severity} onValueChange={(v) => updateExtraParams({ severity: String(v ?? '') })}>
-			<Select.Trigger class="w-42.5">{params.severity || 'All severities'}</Select.Trigger>
+		<Select.Root
+			type="single"
+			value={params.severity}
+			onValueChange={(v) => updateExtraParams({ severity: String(v ?? '') })}
+		>
+			<Select.Trigger class="w-42.5"
+				>{params.severity || 'All severities'}</Select.Trigger
+			>
 			<Select.Content>
 				<Select.Item value="">All severities</Select.Item>
 				<Select.Item value="INFO">INFO</Select.Item>
@@ -243,14 +318,16 @@
 			class="w-42.5"
 			placeholder="Category"
 			value={params.category}
-			onchange={(e) => updateExtraParams({ category: (e.target as HTMLInputElement).value })}
+			onchange={(e) =>
+				updateExtraParams({ category: (e.target as HTMLInputElement).value })}
 		/>
 
 		<Input
 			class="w-[220px]"
 			placeholder="Agent ID"
 			value={params.agent_id}
-			onchange={(e) => updateExtraParams({ agent_id: (e.target as HTMLInputElement).value })}
+			onchange={(e) =>
+				updateExtraParams({ agent_id: (e.target as HTMLInputElement).value })}
 		/>
 
 		<DropdownMenu.Root>
@@ -272,18 +349,37 @@
 					<Input type="date" bind:value={dateTo} />
 				</div>
 				<div class="flex items-center justify-end gap-2">
-					<Button variant="ghost" size="sm" onclick={clearDateRange}>Clear</Button>
-					<Button variant="default" size="sm" onclick={applyDateRange}>Apply</Button>
+					<Button variant="ghost" size="sm" onclick={clearDateRange}
+						>Clear</Button
+					>
+					<Button variant="default" size="sm" onclick={applyDateRange}
+						>Apply</Button
+					>
 				</div>
 			</DropdownMenu.Content>
 		</DropdownMenu.Root>
 
 		{#if metadata}
-			<span class="ml-auto text-sm text-muted-foreground">{metadata.total} event{metadata.total !== 1 ? 's' : ''} total</span>
+			<span class="ml-auto text-sm text-muted-foreground">
+				{events.length} event{events.length !== 1 ? 's' : ''} on this page
+			</span>
 		{/if}
-		<span class="flex items-center gap-1.5 text-xs text-muted-foreground" title="Realtime stream status">
-			<span class="inline-block h-2 w-2 rounded-full {sseStatus === 'connected' ? 'bg-green-500' : sseStatus === 'connecting' ? 'bg-yellow-500 animate-pulse' : 'bg-red-500'}"></span>
-			{sseStatus === 'connected' ? 'Live' : sseStatus === 'connecting' ? 'Connecting' : 'Offline'}
+		<span
+			class="flex items-center gap-1.5 text-xs text-muted-foreground"
+			title="Realtime stream status"
+		>
+			<span
+				class="inline-block h-2 w-2 rounded-full {sseStatus === 'connected'
+					? 'bg-green-500'
+					: sseStatus === 'connecting'
+						? 'bg-yellow-500 animate-pulse'
+						: 'bg-red-500'}"
+			></span>
+			{sseStatus === 'connected'
+				? 'Live'
+				: sseStatus === 'connecting'
+					? 'Connecting'
+					: 'Offline'}
 		</span>
 	</div>
 
@@ -291,116 +387,216 @@
 		{#if eventsQuery.isPending}
 			<Loading label="Loading events…" />
 		{:else if eventsQuery.isError}
-			<div class="flex flex-col items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
+			<div
+				class="flex flex-col items-center justify-center gap-2 py-12 text-sm text-muted-foreground"
+			>
 				<span class="text-destructive font-medium">Failed to load events</span>
 				<span>{eventsQuery.error?.message}</span>
-				<Button variant="outline" size="sm" onclick={() => eventsQuery.refetch()}>Try again</Button>
+				<Button
+					variant="outline"
+					size="sm"
+					onclick={() => eventsQuery.refetch()}>Try again</Button
+				>
 			</div>
 		{:else if events.length === 0}
-			<div class="flex flex-col items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
+			<div
+				class="flex flex-col items-center justify-center gap-2 py-12 text-sm text-muted-foreground"
+			>
 				<span>No events found</span>
 			</div>
 		{:else}
-			<EventsDataTable data={events} {params} {onSortChange} onView={viewEvent} />
+			<EventsDataTable
+				data={events}
+				params={tableParams}
+				onSortChange={() => {}}
+				onView={viewEvent}
+			/>
 		{/if}
 	</div>
 
 	<div class="flex items-center justify-between">
-		<LimitSelect value={params.limit} onValueChange={(v) => handleLimitChange(String(v))} />
-		<Pagination page={params.page} {totalPages} onPageChange={gotoPage} />
+		<LimitSelect
+			value={params.limit}
+			onValueChange={(v) => handleLimitChange(String(v))}
+		/>
+		<div class="flex items-center gap-2">
+			<span class="text-sm text-muted-foreground">Page {currentPage}</span>
+			<Button
+				variant="outline"
+				size="icon"
+				class="h-8 w-8"
+				disabled={cursorStack.length <= 1 || eventsQuery.isFetching}
+				onclick={goPrev}
+				aria-label="Previous page"
+			>
+				<ChevronLeftIcon class="h-4 w-4" />
+			</Button>
+			<Button
+				variant="outline"
+				size="icon"
+				class="h-8 w-8"
+				disabled={!hasMore || eventsQuery.isFetching}
+				onclick={goNext}
+				aria-label="Next page"
+			>
+				<ChevronRightIcon class="h-4 w-4" />
+			</Button>
+		</div>
 	</div>
 
 	<Dialog.Root bind:open={detailDialogOpen}>
-		<Dialog.Content class="w-[calc(100vw-2rem)] max-w-6xl max-h-[90vh] overflow-hidden">
+		<Dialog.Content
+			class="w-[calc(100vw-2rem)] max-w-6xl max-h-[90vh] overflow-hidden"
+		>
 			<Dialog.Header>
 				<Dialog.Title>Event Details</Dialog.Title>
-				<Dialog.Description>Inspect complete payload for the selected event.</Dialog.Description>
+				<Dialog.Description
+					>Inspect complete payload for the selected event.</Dialog.Description
+				>
 			</Dialog.Header>
 
 			{#if selectedEventID}
 				{#if detailQuery.isPending}
 					<Loading label="Loading event details…" />
 				{:else if detailQuery.isError}
-					<div class="p-4 text-sm text-destructive">Failed to load event details: {detailQuery.error?.message}</div>
+					<div class="p-4 text-sm text-destructive">
+						Failed to load event details: {detailQuery.error?.message}
+					</div>
 				{:else if !detailQuery.data?.data}
-					<div class="p-4 text-sm text-muted-foreground">Event detail not found.</div>
+					<div class="p-4 text-sm text-muted-foreground">
+						Event detail not found.
+					</div>
 				{:else}
 					{@const detail = detailQuery.data.data}
-					{@const relatedTimeline = toEventTimeline(events.filter((event) => {
-						if (detail.source_ip && event.source_ip === detail.source_ip) return true
-						if (detail.agent_id && event.agent_id === detail.agent_id) return true
-						if (detail.hostname && event.hostname === detail.hostname) return true
-						return false
-					})).slice(0, 8)}
+					{@const relatedTimeline = toEventTimeline(
+						events.filter((event) => {
+							if (detail.source_ip && event.source_ip === detail.source_ip)
+								return true
+							if (detail.agent_id && event.agent_id === detail.agent_id)
+								return true
+							if (detail.hostname && event.hostname === detail.hostname)
+								return true
+							return false
+						}),
+					).slice(0, 8)}
 					<div class="max-h-[calc(90vh-8rem)] overflow-y-auto pr-1">
-						<div class="grid grid-cols-1 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] gap-4 text-sm">
+						<div
+							class="grid grid-cols-1 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] gap-4 text-sm"
+						>
 							<div class="rounded-md border p-4 space-y-2 min-w-0">
-							<p><span class="text-muted-foreground">Event ID:</span> <span class="font-mono text-xs">{detail.id}</span></p>
-							<p>
-								<span class="text-muted-foreground">Agent ID:</span>
-								<a class="ml-1 font-mono text-xs underline underline-offset-2 hover:text-foreground/80" href={buildEventsFilterPivotHref({ agent_id: detail.agent_id })}>
-									{detail.agent_id}
-								</a>
-							</p>
-							<p>
-								<span class="text-muted-foreground">Hostname:</span>
-								{#if detail.hostname}
-									<a class="ml-1 underline underline-offset-2 hover:text-foreground/80" href={buildEventsSearchPivotHref(detail.hostname)}>
-										{detail.hostname}
-									</a>
-								{:else}
-									-
-								{/if}
-							</p>
-							<p>
-								<span class="text-muted-foreground">Source IP:</span>
-								{#if detail.source_ip}
-									<a class="ml-1 font-mono text-xs underline underline-offset-2 hover:text-foreground/80" href={buildEventsSearchPivotHref(detail.source_ip)}>
-										{detail.source_ip}
-									</a>
-								{:else}
-									-
-								{/if}
-							</p>
-							<p><span class="text-muted-foreground">Severity:</span> {detail.severity || '-'}</p>
-							<p>
-								<span class="text-muted-foreground">Category:</span>
-								{#if detail.category}
-									<a class="ml-1 underline underline-offset-2 hover:text-foreground/80" href={buildEventsFilterPivotHref({ category: detail.category })}>
-										{detail.category}
-									</a>
-								{:else}
-									-
-								{/if}
-							</p>
-							</div>
-							<div class="rounded-md border p-4 space-y-2 min-w-0">
-							<p><span class="text-muted-foreground">Event Time:</span> {detail.event_time}</p>
-							<p><span class="text-muted-foreground">Received At:</span> {detail.received_at}</p>
-							<p><span class="text-muted-foreground">Input Type:</span> {detail.input_type || '-'}</p>
-							<p><span class="text-muted-foreground">Facility:</span> {detail.facility || '-'}</p>
-							<p><span class="text-muted-foreground">Message:</span></p>
-							<p class="rounded bg-muted/50 px-2 py-1 break-words">{detail.message}</p>
-							{#if detail.source_ip}
 								<p>
-									<span class="text-muted-foreground">Related alerts:</span>
-									<a class="ml-1 underline underline-offset-2 hover:text-foreground/80" href={buildAlertsPivotHref(detail.source_ip)}>
-										Open alerts by source IP
+									<span class="text-muted-foreground">Event ID:</span>
+									<span class="font-mono text-xs">{detail.id}</span>
+								</p>
+								<p>
+									<span class="text-muted-foreground">Agent ID:</span>
+									<a
+										class="ml-1 font-mono text-xs underline underline-offset-2 hover:text-foreground/80"
+										href={buildEventsFilterPivotHref({
+											agent_id: detail.agent_id,
+										})}
+									>
+										{detail.agent_id}
 									</a>
 								</p>
-							{/if}
+								<p>
+									<span class="text-muted-foreground">Hostname:</span>
+									{#if detail.hostname}
+										<a
+											class="ml-1 underline underline-offset-2 hover:text-foreground/80"
+											href={buildEventsSearchPivotHref(detail.hostname)}
+										>
+											{detail.hostname}
+										</a>
+									{:else}
+										-
+									{/if}
+								</p>
+								<p>
+									<span class="text-muted-foreground">Source IP:</span>
+									{#if detail.source_ip}
+										<a
+											class="ml-1 font-mono text-xs underline underline-offset-2 hover:text-foreground/80"
+											href={buildEventsSearchPivotHref(detail.source_ip)}
+										>
+											{detail.source_ip}
+										</a>
+									{:else}
+										-
+									{/if}
+								</p>
+								<p>
+									<span class="text-muted-foreground">Severity:</span>
+									{detail.severity || '-'}
+								</p>
+								<p>
+									<span class="text-muted-foreground">Category:</span>
+									{#if detail.category}
+										<a
+											class="ml-1 underline underline-offset-2 hover:text-foreground/80"
+											href={buildEventsFilterPivotHref({
+												category: detail.category,
+											})}
+										>
+											{detail.category}
+										</a>
+									{:else}
+										-
+									{/if}
+								</p>
+							</div>
+							<div class="rounded-md border p-4 space-y-2 min-w-0">
+								<p>
+									<span class="text-muted-foreground">Event Time:</span>
+									{detail.event_time}
+								</p>
+								<p>
+									<span class="text-muted-foreground">Received At:</span>
+									{detail.received_at}
+								</p>
+								<p>
+									<span class="text-muted-foreground">Input Type:</span>
+									{detail.input_type || '-'}
+								</p>
+								<p>
+									<span class="text-muted-foreground">Facility:</span>
+									{detail.facility || '-'}
+								</p>
+								<p><span class="text-muted-foreground">Message:</span></p>
+								<p class="rounded bg-muted/50 px-2 py-1 break-words">
+									{detail.message}
+								</p>
+								{#if detail.source_ip}
+									<p>
+										<span class="text-muted-foreground">Related alerts:</span>
+										<a
+											class="ml-1 underline underline-offset-2 hover:text-foreground/80"
+											href={buildAlertsPivotHref(detail.source_ip)}
+										>
+											Open alerts by source IP
+										</a>
+									</p>
+								{/if}
 							</div>
 						</div>
-						<div class="mt-4 grid grid-cols-1 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] gap-4">
+						<div
+							class="mt-4 grid grid-cols-1 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] gap-4"
+						>
 							<div class="rounded-md border p-4 min-w-0">
-								<p class="mb-2 text-sm text-muted-foreground">Related timeline (current result set)</p>
+								<p class="mb-2 text-sm text-muted-foreground">
+									Related timeline (current result set)
+								</p>
 								{#if relatedTimeline.length === 0}
-									<p class="text-xs text-muted-foreground">No related events in current page result.</p>
+									<p class="text-xs text-muted-foreground">
+										No related events in current page result.
+									</p>
 								{:else}
 									<ul class="space-y-2 text-xs">
 										{#each relatedTimeline as item (item.id + (item.event_time || item.received_at || ''))}
 											<li class="rounded border bg-muted/20 px-2 py-1">
-												<p class="text-muted-foreground">{item.event_time || item.received_at}</p>
+												<p class="text-muted-foreground">
+													{item.event_time || item.received_at}
+												</p>
 												<p class="break-words">{item.message}</p>
 											</li>
 										{/each}
@@ -410,11 +606,16 @@
 							<div class="space-y-4 min-w-0">
 								<div class="rounded-md border p-4">
 									<p class="text-sm text-muted-foreground mb-2">Normalized</p>
-									<pre class="text-xs max-h-64 overflow-auto rounded bg-muted/50 p-2 whitespace-pre-wrap break-words">{stringifyNormalized(detail.normalized)}</pre>
+									<pre
+										class="text-xs max-h-64 overflow-auto rounded bg-muted/50 p-2 whitespace-pre-wrap break-words">{stringifyNormalized(
+											detail.normalized,
+										)}</pre>
 								</div>
 								<div class="rounded-md border p-4">
 									<p class="text-sm text-muted-foreground mb-2">Raw</p>
-									<pre class="text-xs max-h-64 overflow-auto rounded bg-muted/50 p-2 whitespace-pre-wrap break-words">{detail.raw || '-'}</pre>
+									<pre
+										class="text-xs max-h-64 overflow-auto rounded bg-muted/50 p-2 whitespace-pre-wrap break-words">{detail.raw ||
+											'-'}</pre>
 								</div>
 							</div>
 						</div>

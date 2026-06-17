@@ -118,20 +118,18 @@ func (r *pgEventRepository) BatchInsert(ctx context.Context, events []*domain.Ev
 	return err
 }
 
-func (r *pgEventRepository) List(ctx context.Context, f ListFilter) ([]*domain.Event, int, error) {
-	allowedCols := map[string]string{
-		"received_at": "received_at",
-		"event_time":  "event_time",
-		"hostname":    "hostname",
-		"severity":    "severity",
-		"category":    "category",
-		"created_at":  "created_at",
-	}
-	sortCol, ok := allowedCols[f.SortBy]
-	if !ok {
-		sortCol = "received_at"
-	}
-
+// List returns a page of events using keyset (cursor) pagination.
+//
+// COUNT(*) and OFFSET have been removed intentionally: both cause full or
+// near-full partition scans on large partitioned tables, which was the root
+// cause of p95 > 4 s under load. The replacement uses a composite tuple
+// comparison (received_at, id) that hits the covering index directly.
+//
+// Ordering is always by (received_at, id) in the requested direction so that
+// the cursor position is unambiguous. Custom sort columns are not supported
+// together with cursor pagination, received_at is the canonical sort key for
+// time-series event data.
+func (r *pgEventRepository) List(ctx context.Context, f ListFilter) ([]*domain.Event, string, error) {
 	direction := "DESC"
 	if strings.EqualFold(string(f.Order), "asc") {
 		direction = "ASC"
@@ -140,10 +138,6 @@ func (r *pgEventRepository) List(ctx context.Context, f ListFilter) ([]*domain.E
 	limit := 10
 	if f.Limit > 0 {
 		limit = f.Limit
-	}
-	offset := 0
-	if f.Offset > 0 {
-		offset = f.Offset
 	}
 
 	// Default date window: last 30 days. Keeps partition pruning effective.
@@ -157,8 +151,8 @@ func (r *pgEventRepository) List(ctx context.Context, f ListFilter) ([]*domain.E
 		dateTo = *f.DateTo
 	}
 
-	// Build dynamic WHERE clause.
-	args := []any{dateFrom, dateTo} // $1, $2 always present (partition pruning)
+	// $1, $2, always present; drive partition pruning on received_at.
+	args := []any{dateFrom, dateTo}
 	conditions := []string{"received_at >= $1", "received_at <= $2"}
 
 	if f.Search != "" {
@@ -181,18 +175,31 @@ func (r *pgEventRepository) List(ctx context.Context, f ListFilter) ([]*domain.E
 		conditions = append(conditions, fmt.Sprintf("agent_id = $%d", len(args)))
 	}
 
-	where := "WHERE " + strings.Join(conditions, " AND ")
-
-	// Total count - bounded by the date range so Postgres only scans pruned partitions.
-	countQ := fmt.Sprintf("SELECT COUNT(*) FROM events %s", where)
-	var total int
-	if err := r.db.QueryRow(ctx, countQ, args...).Scan(&total); err != nil {
-		return nil, 0, err
+	// Keyset condition: resume from the cursor position.
+	// ROW comparison (received_at, id) < (ts, uuid) lets Postgres seek directly
+	// into the index without scanning all preceding rows.
+	if f.Cursor != "" {
+		cur, err := DecodeCursor(f.Cursor)
+		if err != nil {
+			return nil, "", fmt.Errorf("list events: %w", err)
+		}
+		args = append(args, cur.ReceivedAt, cur.ID)
+		nTs, nID := len(args)-1, len(args)
+		op := "<"
+		if direction == "ASC" {
+			op = ">"
+		}
+		// Standard SQL row value comparison; supported natively by PostgreSQL.
+		conditions = append(conditions,
+			fmt.Sprintf("(received_at, id) %s ($%d, $%d)", op, nTs, nID),
+		)
 	}
 
-	// Paginated data query.
-	args = append(args, limit, offset)
-	nLimit, nOffset := len(args)-1, len(args)
+	where := "WHERE " + strings.Join(conditions, " AND ")
+
+	args = append(args, limit)
+	nLimit := len(args)
+
 	dataQ := fmt.Sprintf(`
 		SELECT id, event_time, received_at,
 		       agent_id, hostname, source_ip::text, input_type,
@@ -200,13 +207,13 @@ func (r *pgEventRepository) List(ctx context.Context, f ListFilter) ([]*domain.E
 		       message, normalized, raw
 		FROM events
 		%s
-		ORDER BY %s %s
-		LIMIT $%d OFFSET $%d
-	`, where, sortCol, direction, nLimit, nOffset)
+		ORDER BY received_at %s, id %s
+		LIMIT $%d
+	`, where, direction, direction, nLimit)
 
 	rows, err := r.db.Query(ctx, dataQ, args...)
 	if err != nil {
-		return nil, 0, err
+		return nil, "", err
 	}
 	defer rows.Close()
 
@@ -231,7 +238,7 @@ func (r *pgEventRepository) List(ctx context.Context, f ListFilter) ([]*domain.E
 			&metaBytes,
 			&e.Raw,
 		); err != nil {
-			return nil, 0, err
+			return nil, "", err
 		}
 
 		if sourceIP != nil {
@@ -239,16 +246,27 @@ func (r *pgEventRepository) List(ctx context.Context, f ListFilter) ([]*domain.E
 		}
 		if metaBytes != nil {
 			if err := json.Unmarshal(metaBytes, &e.Normalized); err != nil {
-				return nil, 0, err
+				return nil, "", err
 			}
 		}
 		events = append(events, &e)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, 0, err
+		return nil, "", err
 	}
 
-	return events, total, nil
+	// Build the next-page cursor from the last row.
+	// An empty cursor signals that the caller has reached the end of results.
+	nextCursor := ""
+	if len(events) == limit {
+		last := events[len(events)-1]
+		nextCursor = EncodeCursor(PageCursor{
+			ReceivedAt: last.ReceivedAt,
+			ID:         last.ID,
+		})
+	}
+
+	return events, nextCursor, nil
 }
 
 func (r *pgEventRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.Event, error) {

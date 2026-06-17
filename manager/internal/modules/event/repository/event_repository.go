@@ -19,7 +19,7 @@ type ListFilter struct {
 	query.BaseFilter
 
 	// DateFrom restricts results to events received on or after this time.
-	// Defaults to NOW()-24h if not set. Required for partition pruning.
+	// Defaults to NOW()-30d if not set. Required for partition pruning.
 	DateFrom *time.Time
 
 	// DateTo restricts results to events received on or before this time.
@@ -34,6 +34,12 @@ type ListFilter struct {
 
 	// Category filters by exact category value (optional).
 	Category string
+
+	// Cursor is the opaque keyset pagination token returned by the previous
+	// List call. Empty string means "start from the first page".
+	// When set, OFFSET-based pagination is not used; the query resumes from
+	// the position encoded in this token instead.
+	Cursor string
 }
 
 // EventRepository defines the persistence contract for the event module.
@@ -44,9 +50,10 @@ type EventRepository interface {
 	// BatchInsert persists multiple events in a single round-trip using COPY.
 	BatchInsert(ctx context.Context, events []*domain.Event) error
 
-	// List returns a filtered, sorted, paginated slice of events together
-	// with the total count matching the filter (ignoring limit/offset).
-	List(ctx context.Context, filter ListFilter) ([]*domain.Event, int, error)
+	// List returns a filtered, sorted, paginated slice of events and an opaque
+	// next-page cursor. The cursor is empty when there are no further pages.
+	// COUNT(*) is intentionally omitted to avoid full-partition scans.
+	List(ctx context.Context, filter ListFilter) ([]*domain.Event, string, error)
 
 	// GetByID returns a single event by ID, or nil when not found.
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.Event, error)
