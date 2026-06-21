@@ -17,6 +17,26 @@ type EngineMetrics struct {
 	DuplicateAlerts     prometheus.Counter
 	DegradedMode        prometheus.Gauge
 	StateStaleness      prometheus.Gauge
+
+	AlertBufferDepth    prometheus.Gauge
+	AlertFlushTotal     prometheus.Counter
+	AlertFlushBatchSize prometheus.Histogram
+	AlertFlushFailed    prometheus.Counter
+
+	StateBufferDepth    prometheus.Gauge
+	StateFlushTotal     prometheus.Counter
+	StateFlushBatchSize prometheus.Histogram
+	StateFlushFailed    prometheus.Counter
+
+	EvalBufferDepth    prometheus.Gauge
+	EvalFlushTotal     prometheus.Counter
+	EvalFlushBatchSize prometheus.Histogram
+	EvalFlushFailed    prometheus.Counter
+
+	DedupBufferDepth    prometheus.Gauge
+	DedupFlushTotal     prometheus.Counter
+	DedupFlushBatchSize prometheus.Histogram
+	DedupFlushFailed    prometheus.Counter
 }
 
 func NewEngineMetrics() *EngineMetrics {
@@ -66,6 +86,74 @@ func NewEngineMetrics() *EngineMetrics {
 		StateStaleness: promauto.NewGauge(prometheus.GaugeOpts{
 			Name: "xemarify_engine_restored_state_staleness_seconds",
 			Help: "Maximum staleness in seconds across restored runtime states.",
+		}),
+		AlertBufferDepth: promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "xemarify_engine_alert_buffer_depth",
+			Help: "Current number of alerts buffered waiting for batch flush.",
+		}),
+		AlertFlushTotal: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "xemarify_engine_alert_flush_total",
+			Help: "Total number of alert batch flush operations.",
+		}),
+		AlertFlushBatchSize: promauto.NewHistogram(prometheus.HistogramOpts{
+			Name:    "xemarify_engine_alert_flush_batch_size",
+			Help:    "Number of alerts in each batch flush.",
+			Buckets: []float64{1, 5, 10, 25, 50, 100, 250},
+		}),
+		AlertFlushFailed: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "xemarify_engine_alert_flush_failed_total",
+			Help: "Total number of alert batch flush operations that had partial failures.",
+		}),
+		StateBufferDepth: promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "xemarify_engine_state_buffer_depth",
+			Help: "Current number of state upserts buffered waiting for batch flush.",
+		}),
+		StateFlushTotal: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "xemarify_engine_state_flush_total",
+			Help: "Total number of state batch flush operations.",
+		}),
+		StateFlushBatchSize: promauto.NewHistogram(prometheus.HistogramOpts{
+			Name:    "xemarify_engine_state_flush_batch_size",
+			Help:    "Number of state upserts in each batch flush.",
+			Buckets: []float64{1, 5, 10, 25, 50, 100, 250},
+		}),
+		StateFlushFailed: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "xemarify_engine_state_flush_failed_total",
+			Help: "Total number of state batch flush operations that had partial failures.",
+		}),
+		EvalBufferDepth: promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "xemarify_engine_eval_buffer_depth",
+			Help: "Current number of rule evaluations buffered waiting for batch flush.",
+		}),
+		EvalFlushTotal: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "xemarify_engine_eval_flush_total",
+			Help: "Total number of evaluation batch flush operations.",
+		}),
+		EvalFlushBatchSize: promauto.NewHistogram(prometheus.HistogramOpts{
+			Name:    "xemarify_engine_eval_flush_batch_size",
+			Help:    "Number of evaluations in each batch flush.",
+			Buckets: []float64{1, 5, 10, 25, 50, 100, 250, 500},
+		}),
+		EvalFlushFailed: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "xemarify_engine_eval_flush_failed_total",
+			Help: "Total number of evaluation batch flush operations that had partial failures.",
+		}),
+		DedupBufferDepth: promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "xemarify_engine_dedup_buffer_depth",
+			Help: "Current number of dedup entries buffered waiting for batch flush.",
+		}),
+		DedupFlushTotal: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "xemarify_engine_dedup_flush_total",
+			Help: "Total number of dedup batch flush operations.",
+		}),
+		DedupFlushBatchSize: promauto.NewHistogram(prometheus.HistogramOpts{
+			Name:    "xemarify_engine_dedup_flush_batch_size",
+			Help:    "Number of dedup entries in each batch flush.",
+			Buckets: []float64{1, 5, 10, 25, 50, 100},
+		}),
+		DedupFlushFailed: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "xemarify_engine_dedup_flush_failed_total",
+			Help: "Total number of dedup batch flush operations that had partial failures.",
 		}),
 	}
 }

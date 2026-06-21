@@ -34,6 +34,7 @@ type RuleEngine struct {
 	matcher      *RuleMatcher
 	stateStore   *StateStore
 	alertWriter  AlertWriter
+	alertBuilder *PGAlertBuilder
 	metrics      *EngineMetrics
 	log          *logrus.Logger
 	persistence  *persistentRuntimeStore
@@ -85,11 +86,14 @@ type anomalyPersistedData struct {
 func NewRuleEngine(ctx context.Context, db *pgxpool.Pool, log *logrus.Logger) (*RuleEngine, error) {
 	metrics := NewEngineMetrics()
 
+	ab := NewPGAlertBuilder(db, log, metrics)
+
 	engine := &RuleEngine{
 		loader:            NewPGRuleLoader(db),
 		compiler:          NewRuleCompiler(),
 		matcher:           NewRuleMatcher(),
-		alertWriter:       NewPGAlertBuilder(db),
+		alertWriter:       ab,
+		alertBuilder:      ab,
 		metrics:           metrics,
 		log:               log,
 		sequenceStates:    make(map[string]*sequenceRuntimeState),
@@ -99,7 +103,7 @@ func NewRuleEngine(ctx context.Context, db *pgxpool.Pool, log *logrus.Logger) (*
 		reloadStopCh:      make(chan struct{}),
 	}
 	engine.stateStore = NewStateStore(30*time.Second, 100000, log, metrics)
-	engine.persistence = newPersistentRuntimeStore(db)
+	engine.persistence = newPersistentRuntimeStore(db, log, metrics)
 
 	if err := engine.ReloadRules(ctx); err != nil {
 		return nil, err
@@ -114,6 +118,12 @@ func NewRuleEngine(ctx context.Context, db *pgxpool.Pool, log *logrus.Logger) (*
 		engine.metrics.DegradedMode.Set(0)
 	}
 
+	if err := engine.persistence.loadActiveDedupEntries(ctx); err != nil {
+		engine.log.WithError(err).Warn("failed to load dedup entries from DB; in-memory dedup starts fresh")
+	}
+
+	engine.alertBuilder.Start()
+	engine.persistence.Start()
 	engine.startRuleReloadLoop(ctx)
 
 	return engine, nil
@@ -595,6 +605,8 @@ func (e *RuleEngine) Stop() {
 		close(e.reloadStopCh)
 		e.reloadWG.Wait()
 	}
+	e.persistence.Stop()
+	e.alertBuilder.Stop()
 	e.stateStore.Stop()
 }
 
