@@ -130,15 +130,15 @@ func TestEventIngestTriggersAlertIntegration(t *testing.T) {
 		},
 	}
 
-	accepted, err := eventService.IngestBatch(ctx, agentID, &transport.EventBatchRequest{
+	result, err := eventService.IngestBatch(ctx, agentID, &transport.EventBatchRequest{
 		AgentID: agentID.String(),
 		Events:  []transport.IngestEvent{event},
 	})
 	if err != nil {
 		t.Fatalf("ingest batch failed: %v", err)
 	}
-	if accepted != 1 {
-		t.Fatalf("unexpected accepted count: %d", accepted)
+	if result.Accepted != 1 {
+		t.Fatalf("unexpected accepted count: %d", result.Accepted)
 	}
 
 	var storedType string
@@ -192,15 +192,15 @@ func TestEventDerivationIntegration_NoOverride(t *testing.T) {
 		},
 	}
 
-	accepted, err := eventService.IngestBatch(ctx, agentID, &transport.EventBatchRequest{
+	result, err := eventService.IngestBatch(ctx, agentID, &transport.EventBatchRequest{
 		AgentID: agentID.String(),
 		Events:  []transport.IngestEvent{event},
 	})
 	if err != nil {
 		t.Fatalf("ingest batch failed: %v", err)
 	}
-	if accepted != 1 {
-		t.Fatalf("unexpected accepted count: %d", accepted)
+	if result.Accepted != 1 {
+		t.Fatalf("unexpected accepted count: %d", result.Accepted)
 	}
 
 	var storedType string
@@ -246,15 +246,15 @@ func TestEventDerivationIntegration_FromNormalizedStatus(t *testing.T) {
 		},
 	}
 
-	accepted, err := eventService.IngestBatch(ctx, agentID, &transport.EventBatchRequest{
+	result, err := eventService.IngestBatch(ctx, agentID, &transport.EventBatchRequest{
 		AgentID: agentID.String(),
 		Events:  []transport.IngestEvent{event},
 	})
 	if err != nil {
 		t.Fatalf("ingest batch failed: %v", err)
 	}
-	if accepted != 1 {
-		t.Fatalf("unexpected accepted count: %d", accepted)
+	if result.Accepted != 1 {
+		t.Fatalf("unexpected accepted count: %d", result.Accepted)
 	}
 
 	var storedType string
