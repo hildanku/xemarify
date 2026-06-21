@@ -79,11 +79,19 @@ func (h *EventHandler) Ingest(c *gin.Context) {
 
 	h.metrics.EventsReceived.WithLabelValues(agent.ID.String()).Add(float64(len(req.Events)))
 
-	accepted, err := h.svc.IngestBatch(c.Request.Context(), agent.ID, &req)
+	result, err := h.svc.IngestBatch(c.Request.Context(), agent.ID, &req)
 	if err != nil {
 		h.metrics.EventsFailed.WithLabelValues("ingest_error").Inc()
 		if errors.Is(err, service.ErrAgentIDMismatch) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "agent identity mismatch"})
+			return
+		}
+		if errors.Is(err, service.ErrChannelFull) {
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"accepted": result.Accepted,
+				"dropped":  result.Dropped,
+				"error":    "event processing channel full, retry after brief delay",
+			})
 			return
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to ingest event"})
@@ -94,7 +102,8 @@ func (h *EventHandler) Ingest(c *gin.Context) {
 	h.metrics.IngestionLatency.Observe(elapsed)
 
 	c.JSON(http.StatusAccepted, gin.H{
-		"accepted": accepted,
+		"accepted": result.Accepted,
+		"dropped":  0,
 	})
 }
 

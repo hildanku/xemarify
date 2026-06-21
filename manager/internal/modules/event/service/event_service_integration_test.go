@@ -109,6 +109,10 @@ func TestEventIngestTriggersAlertIntegration(t *testing.T) {
 			Name: "xemarify_test_db_insert_duration_seconds",
 			Help: "DB insert latency histogram for tests.",
 		}),
+		ChannelDepth: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "xemarify_test_event_channel_depth",
+			Help: "Channel depth gauge for tests.",
+		}),
 	}
 
 	eventRepository := eventRepo.NewPgEventRepository(pool)
@@ -130,15 +134,15 @@ func TestEventIngestTriggersAlertIntegration(t *testing.T) {
 		},
 	}
 
-	accepted, err := eventService.IngestBatch(ctx, agentID, &transport.EventBatchRequest{
+	result, err := eventService.IngestBatch(ctx, agentID, &transport.EventBatchRequest{
 		AgentID: agentID.String(),
 		Events:  []transport.IngestEvent{event},
 	})
 	if err != nil {
 		t.Fatalf("ingest batch failed: %v", err)
 	}
-	if accepted != 1 {
-		t.Fatalf("unexpected accepted count: %d", accepted)
+	if result.Accepted != 1 {
+		t.Fatalf("unexpected accepted count: %d", result.Accepted)
 	}
 
 	var storedType string
@@ -171,6 +175,10 @@ func TestEventDerivationIntegration_NoOverride(t *testing.T) {
 			Name: "xemarify_test_db_insert_duration_seconds_override",
 			Help: "DB insert latency histogram for tests.",
 		}),
+		ChannelDepth: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "xemarify_test_event_channel_depth_override",
+			Help: "Channel depth gauge for tests.",
+		}),
 	}
 
 	eventService := NewEventService(eventRepository, nil, nil, metrics, logger, 8, 4096)
@@ -192,15 +200,15 @@ func TestEventDerivationIntegration_NoOverride(t *testing.T) {
 		},
 	}
 
-	accepted, err := eventService.IngestBatch(ctx, agentID, &transport.EventBatchRequest{
+	result, err := eventService.IngestBatch(ctx, agentID, &transport.EventBatchRequest{
 		AgentID: agentID.String(),
 		Events:  []transport.IngestEvent{event},
 	})
 	if err != nil {
 		t.Fatalf("ingest batch failed: %v", err)
 	}
-	if accepted != 1 {
-		t.Fatalf("unexpected accepted count: %d", accepted)
+	if result.Accepted != 1 {
+		t.Fatalf("unexpected accepted count: %d", result.Accepted)
 	}
 
 	var storedType string
@@ -225,6 +233,10 @@ func TestEventDerivationIntegration_FromNormalizedStatus(t *testing.T) {
 			Name: "xemarify_test_db_insert_duration_seconds_status",
 			Help: "DB insert latency histogram for tests.",
 		}),
+		ChannelDepth: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "xemarify_test_event_channel_depth_status",
+			Help: "Channel depth gauge for tests.",
+		}),
 	}
 
 	eventService := NewEventService(eventRepository, nil, nil, metrics, logger, 8, 4096)
@@ -246,15 +258,15 @@ func TestEventDerivationIntegration_FromNormalizedStatus(t *testing.T) {
 		},
 	}
 
-	accepted, err := eventService.IngestBatch(ctx, agentID, &transport.EventBatchRequest{
+	result, err := eventService.IngestBatch(ctx, agentID, &transport.EventBatchRequest{
 		AgentID: agentID.String(),
 		Events:  []transport.IngestEvent{event},
 	})
 	if err != nil {
 		t.Fatalf("ingest batch failed: %v", err)
 	}
-	if accepted != 1 {
-		t.Fatalf("unexpected accepted count: %d", accepted)
+	if result.Accepted != 1 {
+		t.Fatalf("unexpected accepted count: %d", result.Accepted)
 	}
 
 	var storedType string

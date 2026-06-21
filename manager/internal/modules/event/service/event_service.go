@@ -21,11 +21,19 @@ import (
 const (
 	defaultEventWorkerCount = 8
 	defaultEventChanBuffer  = 4096
+	channelPushTimeout      = 200 * time.Millisecond
 )
 
 var ErrAgentIDMismatch = errors.New("agent id mismatch")
 
 var ErrEventNotFound = errors.New("event not found")
+
+var ErrChannelFull = errors.New("event processing channel full")
+
+type IngestResult struct {
+	Accepted int
+	Dropped  int
+}
 
 type EventService struct {
 	eventRepo eventRepo.EventRepository
@@ -100,17 +108,15 @@ func (s *EventService) processLoop() {
 	}
 }
 
-// IngestBatch validates, normalizes, and persists an event batch.
-func (s *EventService) IngestBatch(ctx context.Context, authenticatedAgentID uuid.UUID, req *transport.EventBatchRequest) (int, error) {
+func (s *EventService) IngestBatch(ctx context.Context, authenticatedAgentID uuid.UUID, req *transport.EventBatchRequest) (*IngestResult, error) {
 	batchAgentID, err := uuid.Parse(req.AgentID)
 	if err != nil {
-		return 0, fmt.Errorf("invalid agent id: %w", err)
+		return nil, fmt.Errorf("invalid agent id: %w", err)
 	}
 	if batchAgentID != authenticatedAgentID {
-		return 0, ErrAgentIDMismatch
+		return nil, ErrAgentIDMismatch
 	}
 
-	// normalize event
 	events := make([]*domain.Event, 0, len(req.Events))
 	for _, item := range req.Events {
 		receivedAt := time.Now().UTC()
@@ -145,20 +151,42 @@ func (s *EventService) IngestBatch(ctx context.Context, authenticatedAgentID uui
 	dbStart := time.Now()
 	if err := s.eventRepo.BatchInsert(ctx, events); err != nil {
 		s.log.WithField("agent_id", authenticatedAgentID).WithError(err).Error("failed to batch insert events")
-		return 0, fmt.Errorf("db batch insert failed: %w", err)
+		return nil, fmt.Errorf("db batch insert failed: %w", err)
 	}
 	s.metrics.DBInsertLatency.Observe(time.Since(dbStart).Seconds())
+
+	accepted := 0
+	dropped := 0
+
+	s.metrics.ChannelDepth.Set(float64(len(s.eventCh)))
 
 	for _, event := range events {
 		select {
 		case s.eventCh <- event:
+			accepted++
+			continue
 		default:
+		}
+
+		timer := time.NewTimer(channelPushTimeout)
+		select {
+		case s.eventCh <- event:
+			accepted++
+			timer.Stop()
+		case <-timer.C:
+			dropped++
 			s.metrics.EventsFailed.WithLabelValues("channel_full").Inc()
-			s.log.WithField("event_id", event.ID).Warn("event processing channel full, event will not be processed by rule engine")
+			s.log.WithField("event_id", event.ID).Warn("event processing channel full after timeout, event will not be processed by rule engine")
 		}
 	}
 
-	return len(events), nil
+	result := &IngestResult{Accepted: accepted, Dropped: dropped}
+
+	if dropped > 0 {
+		return result, ErrChannelFull
+	}
+
+	return result, nil
 }
 
 // normalize enriches the event's Normalized map with fields from the top-level
