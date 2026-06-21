@@ -47,6 +47,8 @@ type RuleEngine struct {
 	reloadInterval    time.Duration
 	reloadStopCh      chan struct{}
 	reloadWG          sync.WaitGroup
+	recoveryStopCh    chan struct{}
+	recoveryWG        sync.WaitGroup
 }
 
 const defaultRuleReloadInterval = 30 * time.Second
@@ -101,6 +103,7 @@ func NewRuleEngine(ctx context.Context, db *pgxpool.Pool, log *logrus.Logger) (*
 		anomalyStates:     make(map[string]*anomalyRuntimeState),
 		reloadInterval:    defaultRuleReloadInterval,
 		reloadStopCh:      make(chan struct{}),
+		recoveryStopCh:    make(chan struct{}),
 	}
 	engine.stateStore = NewStateStore(30*time.Second, 100000, log, metrics)
 	engine.persistence = newPersistentRuntimeStore(db, log, metrics)
@@ -114,6 +117,7 @@ func NewRuleEngine(ctx context.Context, db *pgxpool.Pool, log *logrus.Logger) (*
 		engine.metrics.DegradedMode.Set(1)
 		engine.metrics.StateRestoreFailed.Inc()
 		engine.log.WithError(err).Error("failed to restore runtime state; entering degraded mode")
+		engine.startDegradedModeRecovery(ctx)
 	} else {
 		engine.metrics.DegradedMode.Set(0)
 	}
@@ -130,11 +134,14 @@ func NewRuleEngine(ctx context.Context, db *pgxpool.Pool, log *logrus.Logger) (*
 }
 
 func (e *RuleEngine) ProcessEvent(ctx context.Context, event *eventDomain.Event) error {
-	if e.degradedMode.Load() {
+	if event == nil {
 		return nil
 	}
 
-	if event == nil {
+	e.metrics.EventsTotal.Inc()
+
+	if e.degradedMode.Load() {
+		e.metrics.EventsDegradedDroppedTotal.Inc()
 		return nil
 	}
 
@@ -142,7 +149,6 @@ func (e *RuleEngine) ProcessEvent(ctx context.Context, event *eventDomain.Event)
 	defer func() {
 		e.metrics.ProcessingLatency.Observe(time.Since(start).Seconds())
 	}()
-	e.metrics.EventsTotal.Inc()
 
 	eventType := e.matcher.EventType(event)
 	if eventType == "" {
@@ -605,6 +611,10 @@ func (e *RuleEngine) Stop() {
 		close(e.reloadStopCh)
 		e.reloadWG.Wait()
 	}
+	if e.recoveryStopCh != nil {
+		close(e.recoveryStopCh)
+		e.recoveryWG.Wait()
+	}
 	e.persistence.Stop()
 	e.alertBuilder.Stop()
 	e.stateStore.Stop()
@@ -629,6 +639,42 @@ func (e *RuleEngine) startRuleReloadLoop(ctx context.Context) {
 					e.log.WithError(err).Warn("failed periodic rule reload")
 				}
 			case <-e.reloadStopCh:
+				return
+			}
+		}
+	}()
+}
+
+const defaultDegradedRecoveryInterval = 60 * time.Second
+
+func (e *RuleEngine) startDegradedModeRecovery(ctx context.Context) {
+	e.recoveryWG.Add(1)
+	go func() {
+		defer e.recoveryWG.Done()
+
+		ticker := time.NewTicker(defaultDegradedRecoveryInterval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				if !e.degradedMode.Load() {
+					return
+				}
+
+				e.metrics.DegradedRecoveryTotal.Inc()
+
+				if err := e.restoreRuntimeState(ctx); err != nil {
+					e.metrics.DegradedRecoveryFailed.Inc()
+					e.log.WithError(err).Warn("degraded mode recovery attempt failed, will retry")
+					continue
+				}
+
+				e.degradedMode.Store(false)
+				e.metrics.DegradedMode.Set(0)
+				e.log.Info("engine recovered from degraded mode, rule processing resumed")
+				return
+			case <-e.recoveryStopCh:
 				return
 			}
 		}

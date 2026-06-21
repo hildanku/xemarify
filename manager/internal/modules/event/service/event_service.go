@@ -157,14 +157,23 @@ func (s *EventService) IngestBatch(ctx context.Context, authenticatedAgentID uui
 
 	accepted := 0
 	dropped := 0
-	pushCtx, cancel := context.WithTimeout(context.Background(), channelPushTimeout)
-	defer cancel()
+
+	s.metrics.ChannelDepth.Set(float64(len(s.eventCh)))
 
 	for _, event := range events {
 		select {
 		case s.eventCh <- event:
 			accepted++
-		case <-pushCtx.Done():
+			continue
+		default:
+		}
+
+		timer := time.NewTimer(channelPushTimeout)
+		select {
+		case s.eventCh <- event:
+			accepted++
+			timer.Stop()
+		case <-timer.C:
 			dropped++
 			s.metrics.EventsFailed.WithLabelValues("channel_full").Inc()
 			s.log.WithField("event_id", event.ID).Warn("event processing channel full after timeout, event will not be processed by rule engine")

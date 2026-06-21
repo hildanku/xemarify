@@ -37,6 +37,10 @@ type EngineMetrics struct {
 	DedupFlushTotal     prometheus.Counter
 	DedupFlushBatchSize prometheus.Histogram
 	DedupFlushFailed    prometheus.Counter
+
+	EventsDegradedDroppedTotal prometheus.Counter
+	DegradedRecoveryTotal      prometheus.Counter
+	DegradedRecoveryFailed     prometheus.Counter
 }
 
 func NewEngineMetrics() *EngineMetrics {
@@ -154,6 +158,18 @@ func NewEngineMetrics() *EngineMetrics {
 		DedupFlushFailed: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "xemarify_engine_dedup_flush_failed_total",
 			Help: "Total number of dedup batch flush operations that had partial failures.",
+		}),
+		EventsDegradedDroppedTotal: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "xemarify_engine_events_degraded_dropped_total",
+			Help: "Total number of events dropped because the engine is in degraded mode.",
+		}),
+		DegradedRecoveryTotal: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "xemarify_engine_degraded_recovery_total",
+			Help: "Total number of degraded mode recovery attempts.",
+		}),
+		DegradedRecoveryFailed: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "xemarify_engine_degraded_recovery_failed_total",
+			Help: "Total number of degraded mode recovery attempts that failed.",
 		}),
 	}
 }

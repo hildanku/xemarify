@@ -11,6 +11,7 @@ type Metrics struct {
 	EventsFailed     *prometheus.CounterVec
 	IngestionLatency prometheus.Histogram
 	DBInsertLatency  prometheus.Histogram
+	ChannelDepth     prometheus.Gauge
 }
 
 // New registers and returns all application metrics.
@@ -37,6 +38,11 @@ func New() *Metrics {
 			Name:    "xemarify_db_insert_duration_seconds",
 			Help:    "Latency of the database insert operation for events.",
 			Buckets: prometheus.DefBuckets,
+		}),
+
+		ChannelDepth: promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "xemarify_event_channel_depth",
+			Help: "Current number of events buffered in the processing channel.",
 		}),
 	}
 }
