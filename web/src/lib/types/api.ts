@@ -173,6 +173,32 @@ export interface EventDetail extends EventItem {
 	raw?: string
 }
 
+export interface DashboardSummary {
+	total_events: number
+	total_alerts: number
+	new_alerts: number
+	total_agents: number
+	online_agents: number
+	audit_log_total: number
+}
+
+export interface TrendPoint {
+	day: string
+	events: number
+	alerts: number
+}
+
+export interface AlertStatusCount {
+	status: string
+	count: number
+}
+
+export interface DashboardStats {
+	summary: DashboardSummary
+	activity_trend: TrendPoint[]
+	alert_status_distribution: AlertStatusCount[]
+}
+
 export interface AuditLog {
 	id: string
 	user_id?: string | null

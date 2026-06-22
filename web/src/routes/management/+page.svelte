@@ -2,7 +2,7 @@
 	import { createQuery } from '@tanstack/svelte-query'
 	import {
 		clientFetch,
-		type ApiResponseWithMetadata,
+		type ApiResponse,
 		type ApiResponseWithCursorMetadata,
 	} from '$lib/client'
 	import { V1_BASE_URL } from '$lib/constant'
@@ -10,7 +10,7 @@
 		REALTIME_INTERVAL_MS,
 		realtimeQueryOptions,
 	} from '$lib/utils/realtime-query'
-	import type { Agent, Alert, AuditLog, EventItem } from '$lib/types/api'
+	import type { Agent, Alert, DashboardStats } from '$lib/types/api'
 	import { Button } from '$lib/components/ui/button/index.js'
 	import * as Card from '$lib/components/ui/card/index.js'
 	import { Badge } from '$lib/components/ui/badge/index.js'
@@ -28,17 +28,6 @@
 		label: string
 		value: string
 		description: string
-	}
-
-	type TrendDatum = {
-		day: string
-		events: number
-		alerts: number
-	}
-
-	type StatusDatum = {
-		status: string
-		count: number
 	}
 
 	const trendChartConfig = {
@@ -59,140 +48,85 @@
 		},
 	} satisfies Chart.ChartConfig
 
-	const alertsSummaryQuery = createQuery<ApiResponseWithCursorMetadata<Alert[]>>(
-		() => ({
-			queryKey: ['dashboard', 'alerts-summary'],
-			queryFn: () =>
-				clientFetch<ApiResponseWithCursorMetadata<Alert[]>>(
-					`${V1_BASE_URL}/alerts?limit=100&order=desc`,
-					{ method: 'GET' },
-				),
-			...realtimeQueryOptions(),
-		}),
-	)
-
-	const newAlertsSummaryQuery = createQuery<ApiResponseWithCursorMetadata<Alert[]>>(
-		() => ({
-			queryKey: ['dashboard', 'alerts-summary', 'new'],
-			queryFn: () =>
-				clientFetch<ApiResponseWithCursorMetadata<Alert[]>>(
-					`${V1_BASE_URL}/alerts?limit=100&order=desc&status=new`,
-					{ method: 'GET' },
-				),
-			...realtimeQueryOptions(),
-		}),
-	)
-
-	const auditLogsSummaryQuery = createQuery<
-		ApiResponseWithMetadata<AuditLog[]>
-	>(() => ({
-		queryKey: ['dashboard', 'audit-logs-summary'],
+	// Single stats query replaces all the individual summary queries
+	const statsQuery = createQuery<ApiResponse<DashboardStats>>(() => ({
+		queryKey: ['dashboard', 'stats'],
 		queryFn: () =>
-			clientFetch<ApiResponseWithMetadata<AuditLog[]>>(
-				`${V1_BASE_URL}/audit-logs?limit=1&offset=0&sort_by=created_at&order=desc`,
+			clientFetch<ApiResponse<DashboardStats>>(
+				`${V1_BASE_URL}/stats`,
 				{ method: 'GET' },
 			),
 		...realtimeQueryOptions(),
 	}))
 
+	// Agents query for online/offline counts (not in stats yet)
 	const agentsQuery = createQuery<ApiResponseWithCursorMetadata<Agent[]>>(() => ({
 		queryKey: ['dashboard', 'agents-overview'],
 		queryFn: () =>
 			clientFetch<ApiResponseWithCursorMetadata<Agent[]>>(
-				`${V1_BASE_URL}/agents?limit=100&order=desc`,
+				`${V1_BASE_URL}/agents?limit=1000&order=desc`,
 				{ method: 'GET' },
 			),
 		...realtimeQueryOptions(),
 	}))
 
-	const eventsSampleQuery = createQuery<
-		ApiResponseWithCursorMetadata<EventItem[]>
-	>(() => ({
-		queryKey: ['dashboard', 'events-sample'],
+	// Recent critical alerts for the table at the bottom
+	const recentAlertsQuery = createQuery<ApiResponseWithCursorMetadata<Alert[]>>(() => ({
+		queryKey: ['dashboard', 'recent-critical-alerts'],
 		queryFn: () =>
-			clientFetch<ApiResponseWithCursorMetadata<EventItem[]>>(
-				`${V1_BASE_URL}/events?limit=80&order=desc`,
+			clientFetch<ApiResponseWithCursorMetadata<Alert[]>>(
+				`${V1_BASE_URL}/alerts?limit=20&order=desc`,
 				{ method: 'GET' },
 			),
 		...realtimeQueryOptions(),
 	}))
-
-	const alertsSampleQuery = createQuery<ApiResponseWithCursorMetadata<Alert[]>>(
-		() => ({
-			queryKey: ['dashboard', 'alerts-sample'],
-			queryFn: () =>
-				clientFetch<ApiResponseWithCursorMetadata<Alert[]>>(
-					`${V1_BASE_URL}/alerts?limit=40&order=desc`,
-					{ method: 'GET' },
-				),
-			...realtimeQueryOptions(),
-		}),
-	)
 
 	let isRefreshing = $state(false)
 
-	const eventsSample = $derived(eventsSampleQuery.data?.data.items ?? [])
-	const eventsHasMore = $derived(
-		eventsSampleQuery.data?.data.metadata.has_more ?? false,
+	const summary = $derived(statsQuery.data?.data.summary)
+	const trendData = $derived(
+		(statsQuery.data?.data.activity_trend ?? []).map((p) => ({
+			...p,
+			day: formatDayLabel(p.day),
+		})),
 	)
-	const eventsTotal = $derived(
-		eventsSample.length > 0
-			? eventsHasMore
-				? eventsSample.length
-				: eventsSample.length
-			: 0,
+	const statusData = $derived(
+		buildStatusData(statsQuery.data?.data.alert_status_distribution ?? []),
 	)
-	const alertsTotal = $derived(
-		alertsSummaryQuery.data?.data.items.length ?? 0,
-	)
-	const alertsHasMore = $derived(
-		alertsSummaryQuery.data?.data.metadata.has_more ?? false,
-	)
-	const newAlertsTotal = $derived(
-		newAlertsSummaryQuery.data?.data.items.length ?? 0,
-	)
-	const newAlertsHasMore = $derived(
-		newAlertsSummaryQuery.data?.data.metadata.has_more ?? false,
-	)
-	const auditLogsTotal = $derived(
-		auditLogsSummaryQuery.data?.data.metadata.total ?? 0,
-	)
+
 	const agents = $derived(agentsQuery.data?.data.items ?? [])
-	const totalAgents = $derived(agents.length)
+	const totalAgents = $derived(summary?.total_agents ?? agents.length)
 	const onlineAgents = $derived(
-		agents.filter((agent) => agent.status === 'ONLINE').length,
+		summary?.online_agents ??
+		agents.filter((a) => a.status === 'ONLINE').length
 	)
 	const agentCoverage = $derived(
 		totalAgents > 0 ? Math.round((onlineAgents / totalAgents) * 100) : 0,
 	)
-	const alertsSample = $derived(alertsSampleQuery.data?.data.items ?? [])
+
+	const recentAlertsSample = $derived(recentAlertsQuery.data?.data.items ?? [])
 	const recentCriticalAlerts = $derived(
-		alertsSample
+		recentAlertsSample
 			.filter(
 				(alert) => alert.severity === 'CRITICAL' || alert.severity === 'HIGH',
 			)
 			.slice(0, 5),
 	)
+
 	const metrics = $derived<DashboardMetric[]>([
 		{
 			label: 'Total Events',
-			value: eventsHasMore
-				? `${formatNumber(eventsTotal)}+`
-				: formatNumber(eventsTotal),
-			description: 'Ingested events (recent sample)',
+			value: formatNumber(summary?.total_events ?? 0),
+			description: 'Ingested events (last 30 days)',
 		},
 		{
 			label: 'Total Alerts',
-			value: alertsHasMore
-				? `${formatNumber(alertsTotal)}+`
-				: formatNumber(alertsTotal),
+			value: formatNumber(summary?.total_alerts ?? 0),
 			description: 'Detected alerts',
 		},
 		{
 			label: 'New Alerts',
-			value: newAlertsHasMore
-				? `${formatNumber(newAlertsTotal)}+`
-				: formatNumber(newAlertsTotal),
+			value: formatNumber(summary?.new_alerts ?? 0),
 			description: 'Needs triage',
 		},
 		{
@@ -201,28 +135,21 @@
 			description: `${formatNumber(onlineAgents)}/${formatNumber(totalAgents)} agents online`,
 		},
 	])
-	const trendData = $derived(buildTrendData(eventsSample, alertsSample))
-	const statusData = $derived(buildStatusData(alertsSample))
+
 	const latestUpdateTimestamp = $derived(
 		Math.max(
-			alertsSummaryQuery.dataUpdatedAt ?? 0,
-			newAlertsSummaryQuery.dataUpdatedAt ?? 0,
-			auditLogsSummaryQuery.dataUpdatedAt ?? 0,
+			statsQuery.dataUpdatedAt ?? 0,
 			agentsQuery.dataUpdatedAt ?? 0,
-			eventsSampleQuery.dataUpdatedAt ?? 0,
-			alertsSampleQuery.dataUpdatedAt ?? 0,
+			recentAlertsQuery.dataUpdatedAt ?? 0,
 		),
 	)
 
 	async function refreshDashboard() {
 		isRefreshing = true
 		await Promise.allSettled([
-			alertsSummaryQuery.refetch(),
-			newAlertsSummaryQuery.refetch(),
-			auditLogsSummaryQuery.refetch(),
+			statsQuery.refetch(),
 			agentsQuery.refetch(),
-			eventsSampleQuery.refetch(),
-			alertsSampleQuery.refetch(),
+			recentAlertsQuery.refetch(),
 		])
 		isRefreshing = false
 	}
@@ -231,63 +158,31 @@
 		return new Intl.NumberFormat('id-ID').format(value)
 	}
 
-	function buildTrendData(events: EventItem[], alerts: Alert[]): TrendDatum[] {
-		const buckets = new Map<string, TrendDatum>()
+	type StatusDistItem = { status: string; count: number }
 
-		for (let index = 6; index >= 0; index -= 1) {
-			const day = new Date()
-			day.setHours(0, 0, 0, 0)
-			day.setDate(day.getDate() - index)
-			const key = toDayKey(day)
-			buckets.set(key, {
-				day: formatDayLabel(day),
-				events: 0,
-				alerts: 0,
-			})
-		}
-
-		for (const event of events) {
-			const key = toDayKey(new Date(event.received_at || event.event_time))
-			const bucket = buckets.get(key)
-			if (bucket) bucket.events += 1
-		}
-
-		for (const alert of alerts) {
-			const key = toDayKey(new Date(alert.triggered_at))
-			const bucket = buckets.get(key)
-			if (bucket) bucket.alerts += 1
-		}
-
-		return Array.from(buckets.values())
-	}
-
-	function buildStatusData(alerts: Alert[]): StatusDatum[] {
-		const counts = new Map<string, number>([
-			['New', 0],
-			['Acknowledged', 0],
-			['Closed', 0],
+	function buildStatusData(dist: StatusDistItem[]) {
+		// Ensure all three statuses always appear in the chart
+		const base = new Map<string, number>([
+			['new', 0],
+			['acknowledged', 0],
+			['closed', 0],
 		])
-
-		for (const alert of alerts) {
-			if (alert.status === 'new') counts.set('New', (counts.get('New') ?? 0) + 1)
-			else if (alert.status === 'acknowledged') {
-				counts.set('Acknowledged', (counts.get('Acknowledged') ?? 0) + 1)
-			} else if (alert.status === 'closed') {
-				counts.set('Closed', (counts.get('Closed') ?? 0) + 1)
-			}
+		for (const item of dist) {
+			base.set(item.status, item.count)
 		}
-
-		return Array.from(counts.entries()).map(([status, count]) => ({ status, count }))
+		const label: Record<string, string> = {
+			new: 'New',
+			acknowledged: 'Acknowledged',
+			closed: 'Closed',
+		}
+		return Array.from(base.entries()).map(([status, count]) => ({
+			status: label[status] ?? status,
+			count,
+		}))
 	}
 
-	function toDayKey(date: Date): string {
-		const year = date.getFullYear()
-		const month = String(date.getMonth() + 1).padStart(2, '0')
-		const day = String(date.getDate()).padStart(2, '0')
-		return `${year}-${month}-${day}`
-	}
-
-	function formatDayLabel(date: Date): string {
+	function formatDayLabel(isoDate: string): string {
+		const date = new Date(isoDate)
 		return date.toLocaleDateString('id-ID', {
 			weekday: 'short',
 			day: '2-digit',
@@ -326,7 +221,7 @@
 	}
 </script>
 
-	<div class="flex flex-1 flex-col gap-4 p-4">
+<div class="flex flex-1 flex-col gap-4 p-4">
 	<div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
 		<div>
 			<h1 class="text-3xl font-bold tracking-tight">Dashboard</h1>
@@ -346,8 +241,8 @@
 				<RefreshCwIcon class={`mr-2 h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
 				{isRefreshing ? 'Refreshing...' : 'Refresh'}
 			</Button>
+		</div>
 	</div>
-</div>
 
 	<div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
 		<Card.Root>
@@ -400,7 +295,7 @@
 			<Card.Header>
 				<Card.Title>Activity Trend</Card.Title>
 				<Card.Description>
-					Event and alert activity over the last 7 days based on the latest data.
+					Event and alert activity over the last 7 days.
 				</Card.Description>
 			</Card.Header>
 			<Card.Content>
@@ -435,7 +330,7 @@
 			<Card.Header>
 				<Card.Title>Alert Status</Card.Title>
 				<Card.Description>
-					Status distribution from the latest alert sample.
+					Status distribution across all alerts.
 				</Card.Description>
 			</Card.Header>
 			<Card.Content class="space-y-4">
@@ -462,15 +357,15 @@
 				<div class="grid grid-cols-3 gap-2 text-sm">
 					<div class="rounded-lg bg-muted/50 p-3">
 						<p class="text-muted-foreground">Audit Logs</p>
-						<p class="mt-1 font-semibold">{formatNumber(auditLogsTotal)}</p>
+						<p class="mt-1 font-semibold">{formatNumber(summary?.audit_log_total ?? 0)}</p>
 					</div>
 					<div class="rounded-lg bg-muted/50 p-3">
-						<p class="text-muted-foreground">Sample Events</p>
-						<p class="mt-1 font-semibold">{formatNumber(eventsSample.length)}</p>
+						<p class="text-muted-foreground">Total Events</p>
+						<p class="mt-1 font-semibold">{formatNumber(summary?.total_events ?? 0)}</p>
 					</div>
 					<div class="rounded-lg bg-muted/50 p-3">
-						<p class="text-muted-foreground">Sample Alerts</p>
-						<p class="mt-1 font-semibold">{formatNumber(alertsSample.length)}</p>
+						<p class="text-muted-foreground">Total Alerts</p>
+						<p class="mt-1 font-semibold">{formatNumber(summary?.total_alerts ?? 0)}</p>
 					</div>
 				</div>
 			</Card.Content>
@@ -492,7 +387,7 @@
 		<Card.Content>
 			{#if recentCriticalAlerts.length === 0}
 				<div class="rounded-lg border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">
-					No `HIGH/CRITICAL` alerts found in the latest sample.
+					No `HIGH/CRITICAL` alerts found in recent data.
 				</div>
 			{:else}
 				<div class="overflow-hidden rounded-lg border">

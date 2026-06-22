@@ -39,6 +39,9 @@ import (
 	ruleHandler "github.com/hildanku/xemarify/internal/modules/rule/handler"
 	ruleRepo "github.com/hildanku/xemarify/internal/modules/rule/repository"
 	ruleService "github.com/hildanku/xemarify/internal/modules/rule/service"
+	statsHandler "github.com/hildanku/xemarify/internal/modules/stats/handler"
+	statsRepo "github.com/hildanku/xemarify/internal/modules/stats/repository"
+	statsService "github.com/hildanku/xemarify/internal/modules/stats/service"
 	setupHandler "github.com/hildanku/xemarify/internal/modules/setup/handler"
 	setupService "github.com/hildanku/xemarify/internal/modules/setup/service"
 	userDomain "github.com/hildanku/xemarify/internal/modules/user/domain"
@@ -219,6 +222,14 @@ func main() {
 	alertsGroup.Use(middleware.RequireRole(userDomain.RoleManager, userDomain.RoleAnalyst))
 	alertHandle := alertHandler.NewAlertHandler(alertSvc, log)
 	alertHandle.Register(alertsGroup)
+
+	// Stats / Dashboard - Manager & Analyst
+	statsRepository := statsRepo.NewPgStatsRepository(db)
+	statsSvc := statsService.NewStatsService(statsRepository, log)
+	statsGroup := managerV1.Group("/stats")
+	statsGroup.Use(middleware.RequireRole(userDomain.RoleManager, userDomain.RoleAnalyst))
+	statsHandle := statsHandler.NewStatsHandler(statsSvc, log)
+	statsHandle.Register(statsGroup)
 
 	// Http Server with graceful shutdown
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
