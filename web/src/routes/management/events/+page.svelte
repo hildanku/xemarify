@@ -31,6 +31,7 @@
 		buildInvestigationHref,
 		toEventTimeline,
 	} from '$lib/utils/investigation'
+	import { formatDateTime, formatDateTimeExact } from '$lib/utils/date'
 
 	type EventPageParams = Omit<TableParams, 'page'> & {
 		severity: string
@@ -323,7 +324,7 @@
 		/>
 
 		<Input
-			class="w-[220px]"
+			class="w-55"
 			placeholder="Agent ID"
 			value={params.agent_id}
 			onchange={(e) =>
@@ -548,11 +549,11 @@
 							<div class="rounded-md border p-4 space-y-2 min-w-0">
 								<p>
 									<span class="text-muted-foreground">Event Time:</span>
-									{detail.event_time}
+									{formatDateTimeExact(detail.event_time)}
 								</p>
 								<p>
 									<span class="text-muted-foreground">Received At:</span>
-									{detail.received_at}
+									{formatDateTimeExact(detail.received_at)}
 								</p>
 								<p>
 									<span class="text-muted-foreground">Input Type:</span>
@@ -563,7 +564,7 @@
 									{detail.facility || '-'}
 								</p>
 								<p><span class="text-muted-foreground">Message:</span></p>
-								<p class="rounded bg-muted/50 px-2 py-1 break-words">
+								<p class="rounded bg-muted/50 px-2 py-1 wrap-break-word">
 									{detail.message}
 								</p>
 								{#if detail.source_ip}
@@ -594,10 +595,10 @@
 									<ul class="space-y-2 text-xs">
 										{#each relatedTimeline as item (item.id + (item.event_time || item.received_at || ''))}
 											<li class="rounded border bg-muted/20 px-2 py-1">
-												<p class="text-muted-foreground">
-													{item.event_time || item.received_at}
-												</p>
-												<p class="break-words">{item.message}</p>
+									<p class="text-muted-foreground">
+										{formatDateTime(item.event_time || item.received_at)}
+									</p>
+												<p class="wrap-break-word">{item.message}</p>
 											</li>
 										{/each}
 									</ul>
@@ -607,14 +608,14 @@
 								<div class="rounded-md border p-4">
 									<p class="text-sm text-muted-foreground mb-2">Normalized</p>
 									<pre
-										class="text-xs max-h-64 overflow-auto rounded bg-muted/50 p-2 whitespace-pre-wrap break-words">{stringifyNormalized(
+										class="text-xs max-h-64 overflow-auto rounded bg-muted/50 p-2 whitespace-pre-wrap wrap-break-word">{stringifyNormalized(
 											detail.normalized,
 										)}</pre>
 								</div>
 								<div class="rounded-md border p-4">
 									<p class="text-sm text-muted-foreground mb-2">Raw</p>
 									<pre
-										class="text-xs max-h-64 overflow-auto rounded bg-muted/50 p-2 whitespace-pre-wrap break-words">{detail.raw ||
+										class="text-xs max-h-64 overflow-auto rounded bg-muted/50 p-2 whitespace-pre-wrap wrap-break-word">{detail.raw ||
 											'-'}</pre>
 								</div>
 							</div>

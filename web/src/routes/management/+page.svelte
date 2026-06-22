@@ -18,6 +18,7 @@
 	import * as Chart from '$lib/components/ui/chart/index.js'
 	import CompactDate from '$lib/components/ui/custom/compact-date.svelte'
 	import { AreaChart, BarChart } from 'layerchart'
+	import { formatDayLabel, formatLastUpdated } from '$lib/utils/date'
 	import FileTextIcon from '@lucide/svelte/icons/file-text'
 	import BellIcon from '@lucide/svelte/icons/bell'
 	import ShieldAlertIcon from '@lucide/svelte/icons/shield-alert'
@@ -181,14 +182,6 @@
 		}))
 	}
 
-	function formatDayLabel(isoDate: string): string {
-		const date = new Date(isoDate)
-		return date.toLocaleDateString('id-ID', {
-			weekday: 'short',
-			day: '2-digit',
-		})
-	}
-
 	function getAlertVariant(status: string):
 		| 'default'
 		| 'secondary'
@@ -211,14 +204,7 @@
 		return 'outline'
 	}
 
-	function formatLastUpdated(timestamp: number): string {
-		if (!timestamp) return 'Waiting for telemetry'
-		return new Date(timestamp).toLocaleTimeString('id-ID', {
-			hour: '2-digit',
-			minute: '2-digit',
-			second: '2-digit',
-		})
-	}
+
 </script>
 
 <div class="flex flex-1 flex-col gap-4 p-4">
@@ -299,7 +285,7 @@
 				</Card.Description>
 			</Card.Header>
 			<Card.Content>
-				<Chart.Container config={trendChartConfig} class="min-h-[260px] w-full">
+				<Chart.Container config={trendChartConfig} class="min-h-65 w-full">
 					<AreaChart
 						data={trendData}
 						x="day"
@@ -334,7 +320,7 @@
 				</Card.Description>
 			</Card.Header>
 			<Card.Content class="space-y-4">
-				<Chart.Container config={statusChartConfig} class="min-h-[260px] w-full">
+				<Chart.Container config={statusChartConfig} class="min-h-65 w-full">
 					<BarChart
 						data={statusData}
 						x="status"

@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { formatDate, formatTime, formatRelative } from '$lib/utils/date'
+
 	let {
 		dateString,
 		fallback = '—',
@@ -7,34 +9,15 @@
 		fallback?: string
 	} = $props()
 
-	function format(ds: string): {
-		date: string
-		time: string
-		relative: string
-	} {
-		const d = new Date(ds)
-		const date = d.toLocaleDateString('id-ID', {
-			day: '2-digit',
-			month: 'short',
-			year: 'numeric',
-		})
-		const time = d.toLocaleTimeString('id-ID', {
-			hour: '2-digit',
-			minute: '2-digit',
-		})
-
-		const diffMs = Date.now() - d.getTime()
-		const secs = Math.floor(diffMs / 1000)
-		let relative = ''
-		if (secs < 60) relative = `${secs}s ago`
-		else if (secs < 3600) relative = `${Math.floor(secs / 60)}m ago`
-		else if (secs < 86400) relative = `${Math.floor(secs / 3600)}h ago`
-		else relative = `${Math.floor(secs / 86400)}d ago`
-
-		return { date, time, relative }
-	}
-
-	const parsed = $derived(dateString ? format(dateString) : null)
+	const parsed = $derived(
+		dateString
+			? {
+					date: formatDate(dateString),
+					time: formatTime(dateString),
+					relative: formatRelative(dateString),
+				}
+			: null,
+	)
 </script>
 
 {#if parsed}

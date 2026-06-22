@@ -147,7 +147,7 @@ WantedBy=multi-user.target`
 				<ol class="space-y-3 text-sm list-none pl-0">
 					{#each installSteps as step, i (i)}
 						<li class="flex gap-3">
-							<span class="flex-shrink-0 w-6 h-6 rounded-full bg-primary/10 text-primary text-xs flex items-center justify-center font-semibold mt-0.5">{i + 1}</span>
+							<span class="shrink-0 w-6 h-6 rounded-full bg-primary/10 text-primary text-xs flex items-center justify-center font-semibold mt-0.5">{i + 1}</span>
 							<span class="text-muted-foreground leading-relaxed">{@html step}</span>
 						</li>
 					{/each}
@@ -180,7 +180,7 @@ WantedBy=multi-user.target`
 					<ol class="space-y-3 text-sm list-none pl-0">
 						{#each firstRunSteps as step, i (i)}
 							<li class="flex gap-3">
-								<span class="flex-shrink-0 w-6 h-6 rounded-full bg-primary/10 text-primary text-xs flex items-center justify-center font-semibold mt-0.5">{i + 1}</span>
+								<span class="shrink-0 w-6 h-6 rounded-full bg-primary/10 text-primary text-xs flex items-center justify-center font-semibold mt-0.5">{i + 1}</span>
 								<span class="text-muted-foreground leading-relaxed text-xs">{@html step}</span>
 							</li>
 						{/each}

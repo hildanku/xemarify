@@ -7,6 +7,7 @@
 	import { Input } from '$lib/components/ui/input/index.js'
 	import * as Card from '$lib/components/ui/card/index.js'
 	import { Badge } from '$lib/components/ui/badge/index.js'
+	import { formatDateTime } from '$lib/utils/date'
 
 	type CreateEnrollmentTokenResponse = {
 		enrollment_token: string
@@ -89,7 +90,7 @@
 
 				{#if generatedAt}
 					<Badge variant="outline">
-						Generated at {generatedAt.toLocaleString()}
+						Generated at {formatDateTime(generatedAt)}
 					</Badge>
 				{/if}
 			</div>
