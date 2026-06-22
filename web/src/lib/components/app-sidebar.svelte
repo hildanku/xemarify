@@ -9,7 +9,7 @@
     import BookOpenIcon from '@lucide/svelte/icons/book-open'
     import SettingsIcon from '@lucide/svelte/icons/settings'
     import UserIcon from '@lucide/svelte/icons/user'
-    import ShieldCheckIcon from '@lucide/svelte/icons/shield-check'
+    import { mode } from 'mode-watcher'
     import { auth } from '$lib/auth/session'
     import NavMain from './nav-main.svelte'
     // import NavProjects from './nav-projects.svelte'
@@ -47,6 +47,14 @@
                 icon: ClipboardListIcon,
             },
         ]
+
+        if (role === 'VIEWER') {
+            items.push({
+                title: 'Agents',
+                url: '/management/agents',
+                icon: ServerIcon,
+            })
+        }
 
         if (role === 'MANAGER') {
             items.push(
@@ -105,21 +113,12 @@
                 <Sidebar.MenuButton size="lg">
                     {#snippet child({ props })}
                         <a href="/management" {...props}>
-                            <div
-                                class="bg-sidebar-primary text-sidebar-primary-foreground flex aspect-square size-8 items-center justify-center rounded-lg"
-                            >
-                                <ShieldCheckIcon class="size-4" />
-                            </div>
-                            <div
-                                class="grid flex-1 text-start text-sm leading-tight"
-                            >
-                                <span class="truncate font-medium"
-                                    >Xemarify</span
-                                >
-                                <span class="truncate text-xs"
-                                    >Security Monitoring</span
-                                >
-                            </div>
+                            <img
+                                src={mode.current === 'dark' ? '/assets/logo_for_dark.svg' : '/assets/logo_for_light.svg'}
+                                alt="Xemarify"
+                                width="200"
+                                height="48"
+                            />
                         </a>
                     {/snippet}
                 </Sidebar.MenuButton>

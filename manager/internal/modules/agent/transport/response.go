@@ -19,19 +19,18 @@ type AgentResponse struct {
 	LastSeenAt *time.Time `json:"last_seen_at,omitempty"`
 }
 
-// ListAgentsMetadata carries pagination and count information for a list response.
+// ListAgentsMetadata carries pagination info for a list response.
+// COUNT(*) and total_pages have been removed in favour of keyset pagination.
 type ListAgentsMetadata struct {
-	// Total is the total number of agents matching the current filter (ignores limit/offset).
-	Total int `json:"total"`
+	// NextCursor is the opaque token to pass as ?cursor= on the next request.
+	// An empty string means this is the last page.
+	NextCursor string `json:"next_cursor"`
 
-	// TotalPages is the total number of pages given the current limit.
-	TotalPages int `json:"total_pages"`
+	// HasMore is a convenience boolean derived from NextCursor.
+	HasMore bool `json:"has_more"`
 
 	// Limit is the page size that was applied.
 	Limit int `json:"limit"`
-
-	// Offset is the number of rows skipped.
-	Offset int `json:"offset"`
 }
 
 // ListAgentsResponse wraps a slice of agents together with pagination metadata.

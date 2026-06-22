@@ -18,19 +18,26 @@
 	import LimitSelect from '$lib/components/ui/custom/limit-select.svelte'
 	import EventsDataTable from '$lib/components/table/events/events-table.svelte'
 	import { Button } from '$lib/components/ui/button/index.js'
+	import { Badge } from '$lib/components/ui/badge/index.js'
 	import { Input } from '$lib/components/ui/input/index.js'
 	import * as Select from '$lib/components/ui/select/index.js'
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js'
 	import * as Dialog from '$lib/components/ui/dialog/index.js'
+	import * as Tabs from '$lib/components/ui/tabs/index.js'
 	import SearchIcon from '@lucide/svelte/icons/search'
 	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left'
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right'
 	import CalendarIcon from '@lucide/svelte/icons/calendar'
+	import FingerprintIcon from '@lucide/svelte/icons/fingerprint'
+	import ClockIcon from '@lucide/svelte/icons/clock'
+	import BracesIcon from '@lucide/svelte/icons/braces'
+	import ActivityIcon from '@lucide/svelte/icons/activity'
 	import { createEventSource } from '$lib/utils/event-source'
 	import {
 		buildInvestigationHref,
 		toEventTimeline,
 	} from '$lib/utils/investigation'
+	import { formatDateTime, formatDateTimeExact } from '$lib/utils/date'
 
 	type EventPageParams = Omit<TableParams, 'page'> & {
 		severity: string
@@ -267,6 +274,17 @@
 			},
 		)
 	}
+
+	function severityClass(severity: string): string {
+		const map: Record<string, string> = {
+			CRITICAL: 'bg-red-600 hover:bg-red-600 text-white border-transparent',
+			HIGH: 'bg-orange-500 hover:bg-orange-500 text-white border-transparent',
+			MEDIUM: 'bg-yellow-500 hover:bg-yellow-500 text-white border-transparent',
+			LOW: 'bg-blue-500 hover:bg-blue-500 text-white border-transparent',
+			INFO: 'bg-slate-500 hover:bg-slate-500 text-white border-transparent',
+		}
+		return map[severity] ?? 'bg-slate-500 hover:bg-slate-500 text-white border-transparent'
+	}
 </script>
 
 <div class="flex flex-1 flex-col gap-4 p-4 max-w-full">
@@ -323,7 +341,7 @@
 		/>
 
 		<Input
-			class="w-[220px]"
+			class="w-55"
 			placeholder="Agent ID"
 			value={params.agent_id}
 			onchange={(e) =>
@@ -445,10 +463,8 @@
 	</div>
 
 	<Dialog.Root bind:open={detailDialogOpen}>
-		<Dialog.Content
-			class="w-[calc(100vw-2rem)] max-w-6xl max-h-[90vh] overflow-hidden"
-		>
-			<Dialog.Header>
+		<Dialog.Content size="xl" class="max-h-[85vh] flex flex-col overflow-hidden">
+			<Dialog.Header class="shrink-0">
 				<Dialog.Title>Event Details</Dialog.Title>
 				<Dialog.Description
 					>Inspect complete payload for the selected event.</Dialog.Description
@@ -456,14 +472,15 @@
 			</Dialog.Header>
 
 			{#if selectedEventID}
+				<div class="min-h-0 flex-1 overflow-y-auto px-0.5">
 				{#if detailQuery.isPending}
 					<Loading label="Loading event details…" />
 				{:else if detailQuery.isError}
-					<div class="p-4 text-sm text-destructive">
+					<div class="p-6 text-sm text-destructive">
 						Failed to load event details: {detailQuery.error?.message}
 					</div>
 				{:else if !detailQuery.data?.data}
-					<div class="p-4 text-sm text-muted-foreground">
+					<div class="p-6 text-sm text-muted-foreground">
 						Event detail not found.
 					</div>
 				{:else}
@@ -479,148 +496,183 @@
 							return false
 						}),
 					).slice(0, 8)}
-					<div class="max-h-[calc(90vh-8rem)] overflow-y-auto pr-1">
-						<div
-							class="grid grid-cols-1 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] gap-4 text-sm"
-						>
-							<div class="rounded-md border p-4 space-y-2 min-w-0">
-								<p>
-									<span class="text-muted-foreground">Event ID:</span>
-									<span class="font-mono text-xs">{detail.id}</span>
-								</p>
-								<p>
-									<span class="text-muted-foreground">Agent ID:</span>
-									<a
-										class="ml-1 font-mono text-xs underline underline-offset-2 hover:text-foreground/80"
-										href={buildEventsFilterPivotHref({
-											agent_id: detail.agent_id,
-										})}
-									>
-										{detail.agent_id}
-									</a>
-								</p>
-								<p>
-									<span class="text-muted-foreground">Hostname:</span>
-									{#if detail.hostname}
+					<Tabs.Root value="identity" class="w-full">
+							<Tabs.List class="w-full">
+								<Tabs.Trigger value="identity" class="flex-1 gap-2"
+									><FingerprintIcon class="h-4 w-4" />Identity</Tabs.Trigger
+								>
+								<Tabs.Trigger value="timestamps" class="flex-1 gap-2"
+									><ClockIcon class="h-4 w-4" />Timestamps</Tabs.Trigger
+								>
+								<Tabs.Trigger value="payload" class="flex-1 gap-2"
+									><BracesIcon class="h-4 w-4" />Payload</Tabs.Trigger
+								>
+							</Tabs.List>
+
+							<Tabs.Content value="identity" class="mt-4">
+								<div class="rounded-lg border divide-y text-sm overflow-hidden">
+									<div class="flex items-start gap-3 px-4 py-2.5 hover:bg-muted/20 transition-colors">
+										<span class="w-30 shrink-0 text-muted-foreground text-xs font-medium">Event ID</span>
+										<span class="font-mono text-xs break-all select-all">{detail.id}</span>
+									</div>
+									<div class="flex items-center gap-3 px-4 py-2.5 hover:bg-muted/20 transition-colors">
+										<span class="w-30 shrink-0 text-muted-foreground text-xs font-medium">Agent ID</span>
 										<a
-											class="ml-1 underline underline-offset-2 hover:text-foreground/80"
-											href={buildEventsSearchPivotHref(detail.hostname)}
-										>
-											{detail.hostname}
-										</a>
-									{:else}
-										-
-									{/if}
-								</p>
-								<p>
-									<span class="text-muted-foreground">Source IP:</span>
+											class="font-mono text-xs underline underline-offset-2 hover:text-foreground/80 break-all"
+											href={buildEventsFilterPivotHref({ agent_id: detail.agent_id })}
+										>{detail.agent_id}</a>
+									</div>
+									<div class="flex items-center gap-3 px-4 py-2.5 hover:bg-muted/20 transition-colors">
+										<span class="w-30 shrink-0 text-muted-foreground text-xs font-medium">Hostname</span>
+										{#if detail.hostname}
+											<a
+												class="underline underline-offset-2 hover:text-foreground/80"
+												href={buildEventsSearchPivotHref(detail.hostname)}
+											>{detail.hostname}</a>
+										{:else}
+											<span class="text-muted-foreground">—</span>
+										{/if}
+									</div>
+									<div class="flex items-center gap-3 px-4 py-2.5 hover:bg-muted/20 transition-colors">
+										<span class="w-30 shrink-0 text-muted-foreground text-xs font-medium">Source IP</span>
+										{#if detail.source_ip}
+											<a
+												class="font-mono text-xs underline underline-offset-2 hover:text-foreground/80"
+												href={buildEventsSearchPivotHref(detail.source_ip)}
+											>{detail.source_ip}</a>
+										{:else}
+											<span class="text-muted-foreground">—</span>
+										{/if}
+									</div>
+									<div class="flex items-center gap-3 px-4 py-2.5 hover:bg-muted/20 transition-colors">
+										<span class="w-30 shrink-0 text-muted-foreground text-xs font-medium">Severity</span>
+									{#if detail.severity}
+										<Badge class={severityClass(detail.severity)}>{detail.severity}</Badge>
+										{:else}
+											<span class="text-muted-foreground">—</span>
+										{/if}
+									</div>
+									<div class="flex items-center gap-3 px-4 py-2.5 hover:bg-muted/20 transition-colors">
+										<span class="w-30 shrink-0 text-muted-foreground text-xs font-medium">Category</span>
+										{#if detail.category}
+											<Badge variant="outline" class="hover:bg-accent transition-colors">
+												<a
+													href={buildEventsFilterPivotHref({ category: detail.category })}
+													class="hover:text-foreground/80"
+												>{detail.category}</a>
+											</Badge>
+										{:else}
+											<span class="text-muted-foreground">—</span>
+										{/if}
+									</div>
+								</div>
+							</Tabs.Content>
+
+							<Tabs.Content value="timestamps" class="mt-4">
+								<div class="rounded-lg border divide-y text-sm overflow-hidden">
+									<div class="flex items-center gap-3 px-4 py-2.5 hover:bg-muted/20 transition-colors">
+										<span class="w-30 shrink-0 text-muted-foreground text-xs font-medium">Event Time</span>
+										<span class="font-medium">{formatDateTimeExact(detail.event_time)}</span>
+									</div>
+									<div class="flex items-center gap-3 px-4 py-2.5 hover:bg-muted/20 transition-colors">
+										<span class="w-30 shrink-0 text-muted-foreground text-xs font-medium">Received At</span>
+										<span class="font-medium">{formatDateTimeExact(detail.received_at)}</span>
+									</div>
+									<div class="flex items-center gap-3 px-4 py-2.5 hover:bg-muted/20 transition-colors">
+										<span class="w-30 shrink-0 text-muted-foreground text-xs font-medium">Input Type</span>
+										<Badge variant="outline" class="font-mono text-xs">{detail.input_type || '—'}</Badge>
+									</div>
+									<div class="flex items-center gap-3 px-4 py-2.5 hover:bg-muted/20 transition-colors">
+										<span class="w-30 shrink-0 text-muted-foreground text-xs font-medium">Facility</span>
+										<Badge variant="outline" class="font-mono text-xs">{detail.facility || '—'}</Badge>
+									</div>
+									<div class="px-4 py-3">
+										<div class="flex gap-3">
+											<span class="w-30 shrink-0 text-muted-foreground text-xs font-medium pt-0.5">Message</span>
+											<div class="rounded-lg bg-muted/40 border px-3 py-2 text-xs font-mono leading-relaxed wrap-break-word flex-1 min-w-0">
+												{detail.message}
+											</div>
+										</div>
+									</div>
 									{#if detail.source_ip}
-										<a
-											class="ml-1 font-mono text-xs underline underline-offset-2 hover:text-foreground/80"
-											href={buildEventsSearchPivotHref(detail.source_ip)}
-										>
-											{detail.source_ip}
-										</a>
-									{:else}
-										-
+										<div class="flex items-center gap-3 px-4 py-2.5 hover:bg-muted/20 transition-colors">
+											<span class="w-30 shrink-0 text-muted-foreground text-xs font-medium">Related</span>
+											<a
+												class="inline-flex items-center gap-1.5 text-xs font-medium text-primary underline underline-offset-2 hover:text-primary/80 transition-colors"
+												href={buildAlertsPivotHref(detail.source_ip)}
+											>
+												Open alerts by source IP
+											</a>
+										</div>
 									{/if}
-								</p>
-								<p>
-									<span class="text-muted-foreground">Severity:</span>
-									{detail.severity || '-'}
-								</p>
-								<p>
-									<span class="text-muted-foreground">Category:</span>
-									{#if detail.category}
-										<a
-											class="ml-1 underline underline-offset-2 hover:text-foreground/80"
-											href={buildEventsFilterPivotHref({
-												category: detail.category,
-											})}
-										>
-											{detail.category}
-										</a>
-									{:else}
-										-
-									{/if}
-								</p>
-							</div>
-							<div class="rounded-md border p-4 space-y-2 min-w-0">
-								<p>
-									<span class="text-muted-foreground">Event Time:</span>
-									{detail.event_time}
-								</p>
-								<p>
-									<span class="text-muted-foreground">Received At:</span>
-									{detail.received_at}
-								</p>
-								<p>
-									<span class="text-muted-foreground">Input Type:</span>
-									{detail.input_type || '-'}
-								</p>
-								<p>
-									<span class="text-muted-foreground">Facility:</span>
-									{detail.facility || '-'}
-								</p>
-								<p><span class="text-muted-foreground">Message:</span></p>
-								<p class="rounded bg-muted/50 px-2 py-1 break-words">
-									{detail.message}
-								</p>
-								{#if detail.source_ip}
-									<p>
-										<span class="text-muted-foreground">Related alerts:</span>
-										<a
-											class="ml-1 underline underline-offset-2 hover:text-foreground/80"
-											href={buildAlertsPivotHref(detail.source_ip)}
-										>
-											Open alerts by source IP
-										</a>
-									</p>
+								</div>
+							</Tabs.Content>
+
+							<Tabs.Content value="payload" class="mt-4">
+								<div class="flex flex-col gap-4">
+									<div class="rounded-lg border overflow-hidden">
+										<div class="flex items-center justify-between border-b bg-muted/30 px-4 py-2">
+											<div class="flex items-center gap-2">
+												<span class="text-xs font-medium text-muted-foreground">Normalized</span>
+												{#if detail.normalized && Object.keys(detail.normalized).length > 0}
+													<span class="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">{Object.keys(detail.normalized).length} keys</span>
+												{/if}
+											</div>
+										</div>
+										<pre
+											class="text-xs max-h-56 overflow-auto p-4 whitespace-pre-wrap wrap-break-word bg-muted/10 font-mono leading-relaxed">{stringifyNormalized(
+												detail.normalized,
+											)}</pre>
+									</div>
+									<div class="rounded-lg border overflow-hidden">
+										<div class="flex items-center justify-between border-b bg-muted/30 px-4 py-2">
+											<span class="text-xs font-medium text-muted-foreground">Raw</span>
+										</div>
+										<pre
+											class="text-xs max-h-56 overflow-auto p-4 whitespace-pre-wrap wrap-break-word bg-muted/10 font-mono leading-relaxed">{detail.raw ||
+											'—'}</pre>
+									</div>
+								</div>
+							</Tabs.Content>
+						</Tabs.Root>
+
+						<!-- Related timeline always visible below tabs -->
+						<div class="rounded-lg border overflow-hidden mt-4">
+							<div class="flex items-center border-b bg-muted/30 px-4 py-2">
+								<div class="flex items-center gap-2">
+									<ActivityIcon class="h-3.5 w-3.5 text-muted-foreground" />
+									<span class="text-xs font-medium text-muted-foreground">
+										Related timeline (current result set)
+									</span>
+								</div>
+								{#if relatedTimeline.length > 0}
+									<span class="ml-auto text-xs text-muted-foreground">{relatedTimeline.length} event{relatedTimeline.length !== 1 ? 's' : ''}</span>
 								{/if}
 							</div>
-						</div>
-						<div
-							class="mt-4 grid grid-cols-1 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] gap-4"
-						>
-							<div class="rounded-md border p-4 min-w-0">
-								<p class="mb-2 text-sm text-muted-foreground">
-									Related timeline (current result set)
-								</p>
+							<div class="p-4">
 								{#if relatedTimeline.length === 0}
-									<p class="text-xs text-muted-foreground">
+									<p class="text-xs text-muted-foreground text-center py-4">
 										No related events in current page result.
 									</p>
 								{:else}
-									<ul class="space-y-2 text-xs">
+									<ul class="relative ml-2 border-l-2 border-muted-foreground/20 space-y-4">
 										{#each relatedTimeline as item (item.id + (item.event_time || item.received_at || ''))}
-											<li class="rounded border bg-muted/20 px-2 py-1">
-												<p class="text-muted-foreground">
-													{item.event_time || item.received_at}
-												</p>
-												<p class="break-words">{item.message}</p>
+											<li class="relative pl-5 -ml-px">
+												<span class="absolute left-0 top-1.5 -translate-x-1/2 h-2.5 w-2.5 rounded-full border-2 border-muted-foreground/40 bg-background"></span>
+												<div class="rounded-lg border bg-muted/20 px-3 py-2 hover:bg-muted/30 transition-colors">
+													<span class="block text-[10px] text-muted-foreground font-medium mb-0.5">
+														{formatDateTime(item.event_time || item.received_at)}
+													</span>
+													<span class="text-xs wrap-break-word leading-relaxed">{item.message}</span>
+												</div>
 											</li>
 										{/each}
 									</ul>
 								{/if}
 							</div>
-							<div class="space-y-4 min-w-0">
-								<div class="rounded-md border p-4">
-									<p class="text-sm text-muted-foreground mb-2">Normalized</p>
-									<pre
-										class="text-xs max-h-64 overflow-auto rounded bg-muted/50 p-2 whitespace-pre-wrap break-words">{stringifyNormalized(
-											detail.normalized,
-										)}</pre>
-								</div>
-								<div class="rounded-md border p-4">
-									<p class="text-sm text-muted-foreground mb-2">Raw</p>
-									<pre
-										class="text-xs max-h-64 overflow-auto rounded bg-muted/50 p-2 whitespace-pre-wrap break-words">{detail.raw ||
-											'-'}</pre>
-								</div>
-							</div>
 						</div>
-					</div>
-				{/if}
+					{/if}
+				</div>
 			{/if}
 		</Dialog.Content>
 	</Dialog.Root>

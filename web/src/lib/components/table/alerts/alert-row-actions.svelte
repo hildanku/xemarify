@@ -4,6 +4,8 @@
 	import { Button } from '$lib/components/ui/button/index.js'
 	import MoreHorizontalIcon from '@lucide/svelte/icons/more-horizontal'
 
+	import { auth } from '$lib/auth/session'
+
 	let {
 		alert,
 		onView,
@@ -13,6 +15,8 @@
 		onView: (id: string) => void
 		onStatus: (id: string, status: AlertStatus) => void
 	} = $props()
+
+	const isViewer = $derived($auth.user?.role === 'VIEWER')
 </script>
 
 <DropdownMenu.Root>
@@ -25,17 +29,19 @@
 	</DropdownMenu.Trigger>
 	<DropdownMenu.Content align="end" class="w-44">
 		<DropdownMenu.Item onclick={() => onView(alert.id)}>View events</DropdownMenu.Item>
-		<DropdownMenu.Item
-			disabled={alert.status === 'acknowledged' || alert.status === 'closed'}
-			onclick={() => onStatus(alert.id, 'acknowledged')}
-		>
-			Acknowledge alert
-		</DropdownMenu.Item>
-		<DropdownMenu.Item
-			disabled={alert.status === 'closed'}
-			onclick={() => onStatus(alert.id, 'closed')}
-		>
-			Close alert
-		</DropdownMenu.Item>
+		{#if !isViewer}
+			<DropdownMenu.Item
+				disabled={alert.status === 'acknowledged' || alert.status === 'closed'}
+				onclick={() => onStatus(alert.id, 'acknowledged')}
+			>
+				Acknowledge alert
+			</DropdownMenu.Item>
+			<DropdownMenu.Item
+				disabled={alert.status === 'closed'}
+				onclick={() => onStatus(alert.id, 'closed')}
+			>
+				Close alert
+			</DropdownMenu.Item>
+		{/if}
 	</DropdownMenu.Content>
 </DropdownMenu.Root>

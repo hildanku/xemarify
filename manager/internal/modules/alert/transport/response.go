@@ -48,11 +48,18 @@ type AlertExplanation struct {
 	Details        map[string]interface{} `json:"details,omitempty"`
 }
 
+// ListAlertsMetadata carries pagination info for a list response.
+// COUNT(*) and total_pages have been removed in favour of keyset pagination.
 type ListAlertsMetadata struct {
-	Total      int `json:"total"`
-	TotalPages int `json:"total_pages"`
-	Limit      int `json:"limit"`
-	Offset     int `json:"offset"`
+	// NextCursor is the opaque token to pass as ?cursor= on the next request.
+	// An empty string means this is the last page.
+	NextCursor string `json:"next_cursor"`
+
+	// HasMore is a convenience boolean derived from NextCursor.
+	HasMore bool `json:"has_more"`
+
+	// Limit is the page size that was applied.
+	Limit int `json:"limit"`
 }
 
 type ListAlertsResponse struct {

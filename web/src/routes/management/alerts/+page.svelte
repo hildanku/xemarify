@@ -3,18 +3,16 @@
 	import { page } from '$app/stores'
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query'
 	import { toast } from 'svelte-sonner'
-	import { clientFetch, type ApiResponse, type ApiResponseWithMetadata } from '$lib/client'
+	import { clientFetch, type ApiResponse, type ApiResponseWithCursorMetadata } from '$lib/client'
 	import { V1_BASE_URL, type TableParams } from '$lib/constant'
 	import {
 		parseTableParams,
 		updateTableParams,
 		updateSearchParams,
-		buildQueryString,
 	} from '$lib/utils/table-params'
 	import type { Alert, AlertDetail, AlertStatus } from '$lib/types/api'
 	import AlertsTable from '$lib/components/table/alerts/alerts-table.svelte'
 	import Loading from '$lib/components/ui/custom/loading.svelte'
-	import Pagination from '$lib/components/ui/custom/pagination.svelte'
 	import LimitSelect from '$lib/components/ui/custom/limit-select.svelte'
 	import { Button } from '$lib/components/ui/button/index.js'
 	import { Input } from '$lib/components/ui/input/index.js'
@@ -22,13 +20,18 @@
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js'
 	import * as Dialog from '$lib/components/ui/dialog/index.js'
 	import SearchIcon from '@lucide/svelte/icons/search'
+	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left'
+	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right'
 	import CalendarIcon from '@lucide/svelte/icons/calendar'
 	import * as Table from '$lib/components/ui/table/index.js'
 	import CompactDate from '$lib/components/ui/custom/compact-date.svelte'
 	import { realtimeQueryOptions } from '$lib/utils/realtime-query'
 	import { buildInvestigationHref, toEventTimeline } from '$lib/utils/investigation'
 
-	type AlertPageParams = TableParams & {
+	type AlertPageParams = {
+		search: string
+		limit: number
+		order: string
 		severity: string
 		status: string
 		triggered_from: string
@@ -39,6 +42,30 @@
 
 	const tableParams = $derived(parseTableParams($page.url))
 	const params = $derived(parseAlertParams($page.url, tableParams))
+
+	let cursorStack = $state<string[]>([''])
+	const currentCursor = $derived(cursorStack[cursorStack.length - 1])
+	const currentPage = $derived(cursorStack.length)
+
+	const filterKey = $derived(
+		[
+			params.search,
+			params.limit,
+			params.order,
+			params.severity,
+			params.status,
+			params.triggered_from,
+			params.triggered_to,
+		].join('|'),
+	)
+	let prevFilterKey = $state('')
+	$effect(() => {
+		if (filterKey !== prevFilterKey) {
+			prevFilterKey = filterKey
+			cursorStack = ['']
+		}
+	})
+
 	let selectedAlertID = $state<string | null>(null)
 	let detailDialogOpen = $state(false)
 	let triggeredFromDate = $state('')
@@ -55,11 +82,11 @@
 		triggeredToDate = toDateInputValue(params.triggered_to)
 	})
 
-	const alertsQuery = createQuery<ApiResponseWithMetadata<Alert[]>>(() => ({
-		queryKey: ['alerts', params],
+	const alertsQuery = createQuery<ApiResponseWithCursorMetadata<Alert[]>>(() => ({
+		queryKey: ['alerts', params, currentCursor],
 		queryFn: () =>
-			clientFetch<ApiResponseWithMetadata<Alert[]>>(
-				`${V1_BASE_URL}/alerts?${buildAlertQueryString(params)}`,
+			clientFetch<ApiResponseWithCursorMetadata<Alert[]>>(
+				`${V1_BASE_URL}/alerts?${buildAlertQueryString(params, currentCursor)}`,
 				{ method: 'GET' },
 			),
 		...realtimeQueryOptions(),
@@ -67,7 +94,7 @@
 
 	const alerts = $derived(alertsQuery.data?.data.items ?? [])
 	const metadata = $derived(alertsQuery.data?.data.metadata)
-	const totalPages = $derived(metadata?.total_pages ?? 1)
+	const hasMore = $derived(metadata?.has_more ?? false)
 
 	const detailQuery = createQuery<ApiResponse<AlertDetail>>(() => ({
 		queryKey: ['alert-detail', selectedAlertID],
@@ -94,17 +121,20 @@
 		},
 	}))
 
-	function onSortChange(sort: string, order: 'asc' | 'desc') {
-		updateTableParams({ sort, order }, $page.url)
+	function goNext() {
+		const nc = metadata?.next_cursor
+		if (!nc) return
+		cursorStack = [...cursorStack, nc]
 	}
 
-	function gotoPage(nextPage: number) {
-		updateTableParams({ page: nextPage }, $page.url)
+	function goPrev() {
+		if (cursorStack.length <= 1) return
+		cursorStack = cursorStack.slice(0, -1)
 	}
 
 	function handleLimitChange(value: string | undefined) {
 		if (!value) return
-		updateTableParams({ limit: parseInt(value), page: 1 }, $page.url)
+		updateTableParams({ limit: parseInt(value) }, $page.url)
 	}
 
 	function viewAlert(id: string) {
@@ -118,7 +148,9 @@
 
 	function parseAlertParams(url: URL, table: TableParams): AlertPageParams {
 		return {
-			...table,
+			search: table.search,
+			limit: table.limit,
+			order: table.order,
 			severity: url.searchParams.get('severity') ?? '',
 			status: url.searchParams.get('status') ?? '',
 			triggered_from: url.searchParams.get('triggered_from') ?? '',
@@ -127,12 +159,6 @@
 	}
 
 	function updateAlertExtraParams(next: Partial<Pick<AlertPageParams, 'severity' | 'status' | 'triggered_from' | 'triggered_to'>>) {
-		const resetPage =
-			('severity' in next && next.severity !== params.severity) ||
-			('status' in next && next.status !== params.status) ||
-			('triggered_from' in next && next.triggered_from !== params.triggered_from) ||
-			('triggered_to' in next && next.triggered_to !== params.triggered_to)
-
 		updateSearchParams(
 			{
 				severity: next.severity,
@@ -141,21 +167,20 @@
 				triggered_to: next.triggered_to,
 			},
 			$page.url,
-			{ resetPage },
 		)
 	}
 
-	function buildAlertQueryString(p: AlertPageParams): string {
-		const baseQuery = buildQueryString(p)
-		const extras = [
-			p.severity ? `severity=${encodeURIComponent(p.severity)}` : '',
-			p.status ? `status=${encodeURIComponent(p.status)}` : '',
-			p.triggered_from ? `triggered_from=${encodeURIComponent(p.triggered_from)}` : '',
-			p.triggered_to ? `triggered_to=${encodeURIComponent(p.triggered_to)}` : '',
-		]
-			.filter(Boolean)
-			.join('&')
-		return extras ? `${baseQuery}&${extras}` : baseQuery
+	function buildAlertQueryString(p: AlertPageParams, cursor: string): string {
+		const qs = new URLSearchParams()
+		qs.set('limit', String(p.limit))
+		qs.set('order', p.order)
+		if (cursor) qs.set('cursor', cursor)
+		if (p.search) qs.set('search', p.search)
+		if (p.severity) qs.set('severity', p.severity)
+		if (p.status) qs.set('status', p.status)
+		if (p.triggered_from) qs.set('triggered_from', p.triggered_from)
+		if (p.triggered_to) qs.set('triggered_to', p.triggered_to)
+		return qs.toString()
 	}
 
 	function toDateInputValue(value: string): string {
@@ -266,9 +291,9 @@
 			</DropdownMenu.Content>
 		</DropdownMenu.Root>
 
-		{#if metadata}
-			<span class="ml-auto text-sm text-muted-foreground">{metadata.total} alert{metadata.total !== 1 ? 's' : ''} total</span>
-		{/if}
+		<span class="ml-auto text-sm text-muted-foreground">
+			{alerts.length} alert{alerts.length !== 1 ? 's' : ''} on this page
+		</span>
 	</div>
 
 	<div class="rounded-lg border bg-background overflow-hidden">
@@ -285,17 +310,42 @@
 				<span>No alerts found</span>
 			</div>
 		{:else}
-			<AlertsTable data={alerts} params={params} onSortChange={onSortChange} onView={viewAlert} onStatus={updateStatus} />
+			<AlertsTable data={alerts} params={tableParams} onSortChange={() => {}} onView={viewAlert} onStatus={updateStatus} />
 		{/if}
 	</div>
 
 	<div class="flex items-center justify-between">
-		<LimitSelect value={params.limit} onValueChange={(v) => handleLimitChange(String(v))} />
-		<Pagination page={params.page} {totalPages} onPageChange={gotoPage} />
+		<LimitSelect
+			value={params.limit}
+			onValueChange={(v) => handleLimitChange(String(v))}
+		/>
+		<div class="flex items-center gap-2">
+			<span class="text-sm text-muted-foreground">Page {currentPage}</span>
+			<Button
+				variant="outline"
+				size="icon"
+				class="h-8 w-8"
+				disabled={cursorStack.length <= 1 || alertsQuery.isFetching}
+				onclick={goPrev}
+				aria-label="Previous page"
+			>
+				<ChevronLeftIcon class="h-4 w-4" />
+			</Button>
+			<Button
+				variant="outline"
+				size="icon"
+				class="h-8 w-8"
+				disabled={!hasMore || alertsQuery.isFetching}
+				onclick={goNext}
+				aria-label="Next page"
+			>
+				<ChevronRightIcon class="h-4 w-4" />
+			</Button>
+		</div>
 	</div>
 
 	<Dialog.Root bind:open={detailDialogOpen}>
-		<Dialog.Content class="max-w-5xl">
+		<Dialog.Content size="xl" class="max-w-5xl">
 			<Dialog.Header>
 				<Dialog.Title>Alert Events</Dialog.Title>
 				<Dialog.Description>Related events that triggered the selected alert.</Dialog.Description>

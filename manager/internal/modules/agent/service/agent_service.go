@@ -40,8 +40,7 @@ func NewAgentService(repo agentRepo.AgentRepository, auditSvc *auditService.Audi
 	return &AgentService{repo: repo, auditSvc: auditSvc, log: log}
 }
 
-// List returns a filtered, sorted, paginated list of agents and the total match count.
-func (s *AgentService) List(ctx context.Context, filter agentRepo.ListFilter) ([]*domain.Agent, int, error) {
+func (s *AgentService) List(ctx context.Context, filter agentRepo.ListFilter) ([]*domain.Agent, string, error) {
 	return s.repo.List(ctx, filter)
 }
 

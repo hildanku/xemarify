@@ -13,6 +13,7 @@
 	import { goto } from '$app/navigation'
 	import { resolve } from '$app/paths'
 	import { logout } from '$lib/auth/session'
+	import { Badge } from "./ui/badge"
 
 	let {
 		user,
@@ -79,22 +80,7 @@
 				<DropdownMenu.Group>
 					<DropdownMenu.Item>
 						<SparklesIcon />
-						Upgrade to Pro
-					</DropdownMenu.Item>
-				</DropdownMenu.Group>
-				<DropdownMenu.Separator />
-				<DropdownMenu.Group>
-					<DropdownMenu.Item>
-						<BadgeCheckIcon />
-						Account
-					</DropdownMenu.Item>
-					<DropdownMenu.Item>
-						<CreditCardIcon />
-						Billing
-					</DropdownMenu.Item>
-					<DropdownMenu.Item>
-						<BellIcon />
-						Notifications
+						Upgrade to Pro <Badge variant="secondary" class="ms-auto">Coming Soon</Badge>
 					</DropdownMenu.Item>
 				</DropdownMenu.Group>
 				<DropdownMenu.Separator />

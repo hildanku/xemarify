@@ -26,9 +26,14 @@ func NewAlertHandler(svc *alertService.AlertService, log *logrus.Logger) *AlertH
 	return &AlertHandler{svc: svc, log: log}
 }
 
-func (h *AlertHandler) Register(rg *gin.RouterGroup) {
+// RegisterRead wires read-only alert routes (Manager, Analyst & Viewer).
+func (h *AlertHandler) RegisterRead(rg *gin.RouterGroup) {
 	rg.GET("", h.List)
 	rg.GET("/:id", h.GetByID)
+}
+
+// RegisterWrite wires mutating alert routes (Manager & Analyst only).
+func (h *AlertHandler) RegisterWrite(rg *gin.RouterGroup) {
 	rg.PATCH("/:id/status", h.UpdateStatus)
 }
 
@@ -37,15 +42,6 @@ func (h *AlertHandler) List(c *gin.Context) {
 	if err := c.ShouldBindQuery(&q); err != nil {
 		response.Write(c, http.StatusBadRequest, err.Error(), nil)
 		return
-	}
-
-	sortBy := q.SortBy
-	if q.Sort != "" {
-		sortBy = q.Sort
-	}
-	offset := q.Offset
-	if offset == 0 && q.Page > 1 {
-		offset = (q.Page - 1) * q.Limit
 	}
 
 	var ruleID *uuid.UUID
@@ -72,19 +68,18 @@ func (h *AlertHandler) List(c *gin.Context) {
 	filter := alertRepo.ListFilter{
 		BaseFilter: query.BaseFilter{
 			Search: q.Search,
-			SortBy: sortBy,
 			Order:  query.SortOrder(q.Order),
 			Limit:  q.Limit,
-			Offset: offset,
 		},
 		Severity:      strings.TrimSpace(strings.ToUpper(q.Severity)),
 		Status:        strings.TrimSpace(strings.ToLower(q.Status)),
 		RuleID:        ruleID,
 		TriggeredFrom: triggeredFrom,
 		TriggeredTo:   triggeredTo,
+		Cursor:        q.Cursor,
 	}
 
-	alerts, total, err := h.svc.List(c.Request.Context(), filter)
+	alerts, nextCursor, err := h.svc.List(c.Request.Context(), filter)
 	if err != nil {
 		if errors.Is(err, alertService.ErrInvalidAlertStatus) {
 			response.Write(c, http.StatusBadRequest, err.Error(), nil)
@@ -100,18 +95,12 @@ func (h *AlertHandler) List(c *gin.Context) {
 		items = append(items, transport.ToAlertResponse(alert))
 	}
 
-	totalPages := 0
-	if filter.Limit > 0 {
-		totalPages = (total + filter.Limit - 1) / filter.Limit
-	}
-
 	response.Write(c, http.StatusOK, "alerts retrieved", transport.ListAlertsResponse{
 		Items: items,
 		Metadata: transport.ListAlertsMetadata{
-			Total:      total,
-			TotalPages: totalPages,
+			NextCursor: nextCursor,
+			HasMore:    nextCursor != "",
 			Limit:      filter.Limit,
-			Offset:     filter.Offset,
 		},
 	})
 }

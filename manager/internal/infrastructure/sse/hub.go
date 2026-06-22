@@ -91,6 +91,8 @@ func (h *Hub) Unregister(client *Client) {
 }
 
 // Broadcast sends a JSON-encoded message to all connected clients.
+// Non-blocking; drops message if broadcast channel is full to prevent
+// blocking worker goroutines.
 func (h *Hub) Broadcast(eventType string, data interface{}) {
 	payload, err := json.Marshal(data)
 	if err != nil {
@@ -98,7 +100,10 @@ func (h *Hub) Broadcast(eventType string, data interface{}) {
 	}
 
 	msg := formatSSEMessage(eventType, payload)
-	h.broadcast <- msg
+	select {
+	case h.broadcast <- msg:
+	default:
+	}
 }
 
 // Stop shuts down the hub gracefully.

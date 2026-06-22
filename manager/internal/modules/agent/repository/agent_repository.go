@@ -12,13 +12,14 @@ import (
 var ErrEnrollmentTokenInvalid = errors.New("enrollment token is invalid or already used")
 
 // ListFilter holds all filter and pagination options for listing agents.
-// It embeds query.BaseFilter for the shared sort/pagination contract, and can be
-// extended with agent-specific fields (e.g. status filter) without touching the
-// shared package.
+// Keyset pagination uses (created_at, id) as the composite cursor.
+// COUNT(*) and OFFSET have been intentionally removed.
 type ListFilter struct {
 	query.BaseFilter
-	// Add agent-specific filter fields here when needed.
-	// e.g. Status domain.AgentStatus
+
+	// Cursor is the opaque keyset pagination token returned by the previous
+	// List call. Empty string means "start from the first page".
+	Cursor string
 }
 
 // AgentRepository defines the persistence contract for the agent module.
@@ -44,9 +45,10 @@ type AgentRepository interface {
 	// GetByID looks up an agent by its ID. Returns nil if not found.
 	GetByID(ctx context.Context, agentId uuid.UUID) (*domain.Agent, error)
 
-	// List returns a filtered, sorted, paginated slice of agents together with
-	// the total number of rows that match the filter (ignoring limit/offset).
-	List(ctx context.Context, filter ListFilter) ([]*domain.Agent, int, error)
+	// List returns a filtered, sorted, paginated slice of agents and an opaque
+	// next-page cursor. The cursor is empty when there are no further pages.
+	// COUNT(*) is intentionally omitted.
+	List(ctx context.Context, filter ListFilter) ([]*domain.Agent, string, error)
 
 	// Delete removes an agent from the database by its ID.
 	Delete(ctx context.Context, agentId uuid.UUID) error
