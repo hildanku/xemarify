@@ -48,6 +48,14 @@
             },
         ]
 
+        if (role === 'VIEWER') {
+            items.push({
+                title: 'Agents',
+                url: '/management/agents',
+                icon: ServerIcon,
+            })
+        }
+
         if (role === 'MANAGER') {
             items.push(
                 {

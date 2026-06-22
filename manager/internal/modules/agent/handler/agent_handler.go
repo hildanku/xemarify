@@ -29,12 +29,15 @@ func NewAgentHandler(svc *agentService.AgentService, log *logrus.Logger) *AgentH
 	return &AgentHandler{svc: svc, log: log}
 }
 
-// Register wires the agent management routes onto the given router group.
-// The group must already have JWT + RBAC middleware applied.
-func (h *AgentHandler) Register(rg *gin.RouterGroup) {
+// RegisterRead wires read-only agent routes (Manager & Viewer).
+func (h *AgentHandler) RegisterRead(rg *gin.RouterGroup) {
 	rg.GET("", h.List)
-	rg.POST("", h.Create)
 	rg.GET("/:id", h.GetByID)
+}
+
+// RegisterWrite wires mutating agent routes (Manager only).
+func (h *AgentHandler) RegisterWrite(rg *gin.RouterGroup) {
+	rg.POST("", h.Create)
 	rg.PUT("/:id", h.Update)
 	rg.DELETE("/:id", h.Delete)
 }

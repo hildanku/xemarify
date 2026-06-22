@@ -5,10 +5,16 @@ const AUTHENTICATED_ONLY_PREFIXES = ['/management', '/access-limited'] as const
 
 const MANAGER_ONLY_PREFIXES = [
 	'/management/users',
-	'/management/agents',
 	'/management/enrollment-tokens',
 	'/management/agent-onboarding',
 	'/management/rules',
+] as const
+
+const VIEWER_ACCESSIBLE_PREFIXES = [
+	'/management/alerts',
+	'/management/events',
+	'/management/audit-logs',
+	'/management/agents',
 ] as const
 
 export function canAccessPath(pathname: string, user: SessionUser | null) {
@@ -24,6 +30,14 @@ export function canAccessPath(pathname: string, user: SessionUser | null) {
 		return user.role === 'MANAGER'
 	}
 
+	if (pathname === '/management') {
+		return user.role === 'MANAGER' || user.role === 'ANALYST' || user.role === 'VIEWER'
+	}
+
+	if (VIEWER_ACCESSIBLE_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))) {
+		return user.role === 'MANAGER' || user.role === 'ANALYST' || user.role === 'VIEWER'
+	}
+
 	return user.role === 'MANAGER' || user.role === 'ANALYST'
 }
 
@@ -31,5 +45,6 @@ export function getDefaultRouteForUser(user: SessionUser | null) {
 	if (!user) return resolve('/auth/login')
 	if (user.role === 'MANAGER') return resolve('/management')
 	if (user.role === 'ANALYST') return resolve('/management/alerts')
+	if (user.role === 'VIEWER') return resolve('/management/alerts')
 	return resolve('/access-limited')
 }

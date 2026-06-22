@@ -183,32 +183,37 @@ func main() {
 	userHandle := userHandler.NewUserHandler(userSvc, log)
 	userHandle.Register(usersGroup)
 
-	// Agents (CRUD) - Manager only
+	// Agents read - Manager & Viewer
+	agentsReadGroup := managerV1.Group("/agents")
+	agentsReadGroup.Use(middleware.RequireRole(userDomain.RoleManager, userDomain.RoleViewer))
+	agentHandle.RegisterRead(agentsReadGroup)
+	inventoryHandle.Register(agentsReadGroup)
+
+	// Agents write (CRUD) - Manager only
 	agentsGroup := managerV1.Group("/agents")
 	agentsGroup.Use(middleware.RequireRole(userDomain.RoleManager))
-	agentHandle.Register(agentsGroup)
-	inventoryHandle.Register(agentsGroup)
+	agentHandle.RegisterWrite(agentsGroup)
 
 	// Admin - Manager only
 	adminGroup := managerV1.Group("/admin")
 	adminGroup.Use(middleware.RequireRole(userDomain.RoleManager))
 	agentHandle.RegisterAdmin(adminGroup)
 
-	// Audit Logs - Manager & Analyst
+	// Audit Logs - Manager, Analyst & Viewer
 	auditGroup := managerV1.Group("/audit-logs")
-	auditGroup.Use(middleware.RequireRole(userDomain.RoleManager, userDomain.RoleAnalyst))
+	auditGroup.Use(middleware.RequireRole(userDomain.RoleManager, userDomain.RoleAnalyst, userDomain.RoleViewer))
 	auditHandle := auditHandler.NewAuditLogHandler(auditLogService, log)
 	auditHandle.Register(auditGroup)
 
-	// Events read (list) - Manager & Analyst
+	// Events read (list) - Manager, Analyst & Viewer
 	eventsGroup := managerV1.Group("/events")
-	eventsGroup.Use(middleware.RequireRole(userDomain.RoleManager, userDomain.RoleAnalyst))
+	eventsGroup.Use(middleware.RequireRole(userDomain.RoleManager, userDomain.RoleAnalyst, userDomain.RoleViewer))
 	evtHandler.RegisterManager(eventsGroup)
 
 	// Events SSE stream - separate group with query-param auth for EventSource compatibility
 	eventsStreamGroup := api.Group("/v1/events")
 	eventsStreamGroup.Use(middleware.UserAuthSSE(cfg.JWT))
-	eventsStreamGroup.Use(middleware.RequireRole(userDomain.RoleManager, userDomain.RoleAnalyst))
+	eventsStreamGroup.Use(middleware.RequireRole(userDomain.RoleManager, userDomain.RoleAnalyst, userDomain.RoleViewer))
 	evtHandler.RegisterStream(eventsStreamGroup)
 
 	// Detection Rules - Manager only
@@ -217,17 +222,22 @@ func main() {
 	ruleHandle := ruleHandler.NewRuleHandler(ruleSvc, log)
 	ruleHandle.Register(rulesGroup)
 
-	// Alerts - Manager & Analyst
-	alertsGroup := managerV1.Group("/alerts")
-	alertsGroup.Use(middleware.RequireRole(userDomain.RoleManager, userDomain.RoleAnalyst))
+	// Alerts read - Manager, Analyst & Viewer
+	alertsReadGroup := managerV1.Group("/alerts")
+	alertsReadGroup.Use(middleware.RequireRole(userDomain.RoleManager, userDomain.RoleAnalyst, userDomain.RoleViewer))
 	alertHandle := alertHandler.NewAlertHandler(alertSvc, log)
-	alertHandle.Register(alertsGroup)
+	alertHandle.RegisterRead(alertsReadGroup)
 
-	// Stats / Dashboard - Manager & Analyst
+	// Alerts write (status update) - Manager & Analyst only
+	alertsWriteGroup := managerV1.Group("/alerts")
+	alertsWriteGroup.Use(middleware.RequireRole(userDomain.RoleManager, userDomain.RoleAnalyst))
+	alertHandle.RegisterWrite(alertsWriteGroup)
+
+	// Stats / Dashboard - Manager, Analyst & Viewer
 	statsRepository := statsRepo.NewPgStatsRepository(db)
 	statsSvc := statsService.NewStatsService(statsRepository, log)
 	statsGroup := managerV1.Group("/stats")
-	statsGroup.Use(middleware.RequireRole(userDomain.RoleManager, userDomain.RoleAnalyst))
+	statsGroup.Use(middleware.RequireRole(userDomain.RoleManager, userDomain.RoleAnalyst, userDomain.RoleViewer))
 	statsHandle := statsHandler.NewStatsHandler(statsSvc, log)
 	statsHandle.Register(statsGroup)
 

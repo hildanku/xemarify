@@ -16,6 +16,9 @@
 	import AgentStatusBadge from './agent-status-badge.svelte'
 	import CompactDate from '../../ui/custom/compact-date.svelte'
 	import MoreHorizontalIcon from '@lucide/svelte/icons/more-horizontal'
+	import { auth } from '$lib/auth/session'
+
+	const isViewer = $derived($auth.user?.role === 'VIEWER')
 
 	let {
 		agent,
@@ -122,6 +125,7 @@
 		<DropdownMenu.Item onclick={() => (viewOpen = true)}
 			>View details</DropdownMenu.Item
 		>
+		{#if !isViewer}
 		<DropdownMenu.Item onclick={() => (editOpen = true)}
 			>Edit agent</DropdownMenu.Item
 		>
@@ -132,6 +136,7 @@
 		>
 			Delete agent
 		</DropdownMenu.Item>
+		{/if}
 	</DropdownMenu.Content>
 </DropdownMenu.Root>
 

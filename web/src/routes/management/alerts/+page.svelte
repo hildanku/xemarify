@@ -345,7 +345,7 @@
 	</div>
 
 	<Dialog.Root bind:open={detailDialogOpen}>
-		<Dialog.Content class="max-w-5xl">
+		<Dialog.Content size="xl" class="max-w-5xl">
 			<Dialog.Header>
 				<Dialog.Title>Alert Events</Dialog.Title>
 				<Dialog.Description>Related events that triggered the selected alert.</Dialog.Description>

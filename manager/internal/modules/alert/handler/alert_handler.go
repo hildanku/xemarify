@@ -26,9 +26,14 @@ func NewAlertHandler(svc *alertService.AlertService, log *logrus.Logger) *AlertH
 	return &AlertHandler{svc: svc, log: log}
 }
 
-func (h *AlertHandler) Register(rg *gin.RouterGroup) {
+// RegisterRead wires read-only alert routes (Manager, Analyst & Viewer).
+func (h *AlertHandler) RegisterRead(rg *gin.RouterGroup) {
 	rg.GET("", h.List)
 	rg.GET("/:id", h.GetByID)
+}
+
+// RegisterWrite wires mutating alert routes (Manager & Analyst only).
+func (h *AlertHandler) RegisterWrite(rg *gin.RouterGroup) {
 	rg.PATCH("/:id/status", h.UpdateStatus)
 }
 
