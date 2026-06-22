@@ -4,7 +4,7 @@
 		CreateAgentRequest,
 		UpdateAgentRequest,
 	} from '$lib/types/api'
-	import type { ApiResponseWithMetadata } from '$lib/client'
+	import type { ApiResponseWithCursorMetadata } from '$lib/client'
 	import type { RowSelectionState } from '@tanstack/svelte-table'
 	import {
 		createQuery,
@@ -18,39 +18,47 @@
 	import {
 		parseTableParams,
 		updateTableParams,
-		buildQueryString,
 	} from '$lib/utils/table-params'
-	import { createTableHandlers } from '$lib/utils/table-helpers'
 	import AgentsDataTable from '$lib/components/table/agents/agents-table.svelte'
 	import QueryStateWrapper from '$lib/components/custom/query-state-wrapper.svelte'
 	import SearchInput from '$lib/components/custom/search-input.svelte'
-	import TableFooter from '$lib/components/custom/table-footer.svelte'
+	import LimitSelect from '$lib/components/ui/custom/limit-select.svelte'
 	import { Button } from '$lib/components/ui/button/index.js'
+	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left'
+	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right'
 	import Trash2Icon from '@lucide/svelte/icons/trash-2'
 	import AgentCreateDialog from '$lib/components/table/agents/agent-create-dialog.svelte'
 	import { realtimeQueryOptions } from '$lib/utils/realtime-query'
 
 	const queryClient = useQueryClient()
-	const params = $derived(parseTableParams($page.url))
-	const { handleSortChange, gotoPage, handleLimitChange } = createTableHandlers()
+	const tableParams = $derived(parseTableParams($page.url))
 
-	let rowSelection = $state<RowSelectionState>({})
-	const selectedIds = $derived(
-		Object.keys(rowSelection).filter((k) => rowSelection[k]),
+	let cursorStack = $state<string[]>([''])
+	const currentCursor = $derived(cursorStack[cursorStack.length - 1])
+	const currentPage = $derived(cursorStack.length)
+
+	const filterKey = $derived(
+		[tableParams.search, tableParams.limit, tableParams.order].join('|'),
 	)
+	let prevFilterKey = $state('')
+	$effect(() => {
+		if (filterKey !== prevFilterKey) {
+			prevFilterKey = filterKey
+			cursorStack = ['']
+		}
+	})
 
-	const agentsQuery = createQuery<ApiResponseWithMetadata<Agent[]>>(() => ({
+	const agentsQuery = createQuery<ApiResponseWithCursorMetadata<Agent[]>>(() => ({
 		queryKey: [
 			'agents',
-			params.page,
-			params.limit,
-			params.sort,
-			params.order,
-			params.search,
+			tableParams.search,
+			tableParams.limit,
+			tableParams.order,
+			currentCursor,
 		],
 		queryFn: () =>
-			clientFetch<ApiResponseWithMetadata<Agent[]>>(
-				`${V1_BASE_URL}/agents?${buildQueryString(params)}`,
+			clientFetch<ApiResponseWithCursorMetadata<Agent[]>>(
+				`${V1_BASE_URL}/agents?${buildAgentsQueryString(tableParams, currentCursor)}`,
 				{ method: 'GET' },
 			),
 		...realtimeQueryOptions(),
@@ -58,7 +66,37 @@
 
 	const agents = $derived(agentsQuery.data?.data.items ?? [])
 	const metadata = $derived(agentsQuery.data?.data.metadata)
-	const totalPages = $derived(metadata?.total_pages ?? 1)
+	const hasMore = $derived(metadata?.has_more ?? false)
+
+	function buildAgentsQueryString(p: { search: string; limit: number; order: string }, cursor: string): string {
+		const qs = new URLSearchParams()
+		qs.set('limit', String(p.limit))
+		qs.set('order', p.order)
+		if (cursor) qs.set('cursor', cursor)
+		if (p.search) qs.set('search', p.search)
+		return qs.toString()
+	}
+
+	function goNext() {
+		const nc = metadata?.next_cursor
+		if (!nc) return
+		cursorStack = [...cursorStack, nc]
+	}
+
+	function goPrev() {
+		if (cursorStack.length <= 1) return
+		cursorStack = cursorStack.slice(0, -1)
+	}
+
+	function handleLimitChange(value: string | undefined) {
+		if (!value) return
+		updateTableParams({ limit: parseInt(value) }, $page.url)
+	}
+
+	let rowSelection = $state<RowSelectionState>({})
+	const selectedIds = $derived(
+		Object.keys(rowSelection).filter((k) => rowSelection[k]),
+	)
 
 	const createAgentMutation = createMutation(() => ({
 		mutationFn: (data: CreateAgentRequest) =>
@@ -146,7 +184,6 @@
 </script>
 
 <div class="flex flex-1 flex-col gap-4 p-4 max-w-full">
-	<!-- Page header -->
 	<div class="flex flex-wrap items-center justify-between gap-3">
 		<div>
 			<h1 class="text-3xl font-bold tracking-tight">Agents</h1>
@@ -171,7 +208,7 @@
 	<div class="flex flex-wrap items-center gap-2">
 		<SearchInput
 			placeholder="Search agents..."
-			value={params.search}
+			value={tableParams.search}
 			onInput={(v) => updateTableParams({ search: v }, $page.url)}
 		/>
 		{#if selectedIds.length > 0}
@@ -186,11 +223,9 @@
 			</Button>
 		{/if}
 
-		{#if metadata}
-			<span class="ml-auto text-sm text-muted-foreground">
-				{metadata.total} agent{metadata.total !== 1 ? 's' : ''} total
-			</span>
-		{/if}
+		<span class="ml-auto text-sm text-muted-foreground">
+			{agents.length} agent{agents.length !== 1 ? 's' : ''} on this page
+		</span>
 	</div>
 
 	<div class="rounded-lg border bg-background overflow-hidden">
@@ -201,28 +236,50 @@
 			isEmpty={agents.length === 0}
 			loadingLabel="Loading agents…"
 			emptyMessage="No agents found"
-			showClearSearch={!!params.search}
+			showClearSearch={!!tableParams.search}
 			onRetry={() => agentsQuery.refetch()}
 			onClearSearch={() => updateTableParams({ search: '' }, $page.url)}
 		>
 			<AgentsDataTable
 				data={agents}
-				{params}
+				params={tableParams}
 				bind:rowSelection
-				onSortChange={handleSortChange}
+				onSortChange={() => {}}
 				onDelete={handleDeleteSingle}
 				onEdit={handleEdit}
 			/>
 		</QueryStateWrapper>
 	</div>
 
-	<TableFooter
-		page={params.page}
-		{totalPages}
-		limit={params.limit}
-		onPageChange={gotoPage}
-		onLimitChange={handleLimitChange}
-	/>
+	<div class="flex items-center justify-between">
+		<LimitSelect
+			value={tableParams.limit}
+			onValueChange={(v) => handleLimitChange(String(v))}
+		/>
+		<div class="flex items-center gap-2">
+			<span class="text-sm text-muted-foreground">Page {currentPage}</span>
+			<Button
+				variant="outline"
+				size="icon"
+				class="h-8 w-8"
+				disabled={cursorStack.length <= 1 || agentsQuery.isFetching}
+				onclick={goPrev}
+				aria-label="Previous page"
+			>
+				<ChevronLeftIcon class="h-4 w-4" />
+			</Button>
+			<Button
+				variant="outline"
+				size="icon"
+				class="h-8 w-8"
+				disabled={!hasMore || agentsQuery.isFetching}
+				onclick={goNext}
+				aria-label="Next page"
+			>
+				<ChevronRightIcon class="h-4 w-4" />
+			</Button>
+		</div>
+	</div>
 </div>
 
 <svelte:head>

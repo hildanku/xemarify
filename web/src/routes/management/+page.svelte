@@ -59,24 +59,24 @@
 		},
 	} satisfies Chart.ChartConfig
 
-	const alertsSummaryQuery = createQuery<ApiResponseWithMetadata<Alert[]>>(
+	const alertsSummaryQuery = createQuery<ApiResponseWithCursorMetadata<Alert[]>>(
 		() => ({
 			queryKey: ['dashboard', 'alerts-summary'],
 			queryFn: () =>
-				clientFetch<ApiResponseWithMetadata<Alert[]>>(
-					`${V1_BASE_URL}/alerts?limit=1&offset=0&sort_by=triggered_at&order=desc`,
+				clientFetch<ApiResponseWithCursorMetadata<Alert[]>>(
+					`${V1_BASE_URL}/alerts?limit=100&order=desc`,
 					{ method: 'GET' },
 				),
 			...realtimeQueryOptions(),
 		}),
 	)
 
-	const newAlertsSummaryQuery = createQuery<ApiResponseWithMetadata<Alert[]>>(
+	const newAlertsSummaryQuery = createQuery<ApiResponseWithCursorMetadata<Alert[]>>(
 		() => ({
 			queryKey: ['dashboard', 'alerts-summary', 'new'],
 			queryFn: () =>
-				clientFetch<ApiResponseWithMetadata<Alert[]>>(
-					`${V1_BASE_URL}/alerts?limit=1&offset=0&sort_by=triggered_at&order=desc&status=new`,
+				clientFetch<ApiResponseWithCursorMetadata<Alert[]>>(
+					`${V1_BASE_URL}/alerts?limit=100&order=desc&status=new`,
 					{ method: 'GET' },
 				),
 			...realtimeQueryOptions(),
@@ -95,11 +95,11 @@
 		...realtimeQueryOptions(),
 	}))
 
-	const agentsQuery = createQuery<ApiResponseWithMetadata<Agent[]>>(() => ({
+	const agentsQuery = createQuery<ApiResponseWithCursorMetadata<Agent[]>>(() => ({
 		queryKey: ['dashboard', 'agents-overview'],
 		queryFn: () =>
-			clientFetch<ApiResponseWithMetadata<Agent[]>>(
-				`${V1_BASE_URL}/agents?limit=100&offset=0&sort_by=created_at&order=desc`,
+			clientFetch<ApiResponseWithCursorMetadata<Agent[]>>(
+				`${V1_BASE_URL}/agents?limit=100&order=desc`,
 				{ method: 'GET' },
 			),
 		...realtimeQueryOptions(),
@@ -117,12 +117,12 @@
 		...realtimeQueryOptions(),
 	}))
 
-	const alertsSampleQuery = createQuery<ApiResponseWithMetadata<Alert[]>>(
+	const alertsSampleQuery = createQuery<ApiResponseWithCursorMetadata<Alert[]>>(
 		() => ({
 			queryKey: ['dashboard', 'alerts-sample'],
 			queryFn: () =>
-				clientFetch<ApiResponseWithMetadata<Alert[]>>(
-					`${V1_BASE_URL}/alerts?limit=40&offset=0&sort_by=triggered_at&order=desc`,
+				clientFetch<ApiResponseWithCursorMetadata<Alert[]>>(
+					`${V1_BASE_URL}/alerts?limit=40&order=desc`,
 					{ method: 'GET' },
 				),
 			...realtimeQueryOptions(),
@@ -143,18 +143,22 @@
 			: 0,
 	)
 	const alertsTotal = $derived(
-		alertsSummaryQuery.data?.data.metadata.total ?? 0,
+		alertsSummaryQuery.data?.data.items.length ?? 0,
+	)
+	const alertsHasMore = $derived(
+		alertsSummaryQuery.data?.data.metadata.has_more ?? false,
 	)
 	const newAlertsTotal = $derived(
-		newAlertsSummaryQuery.data?.data.metadata.total ?? 0,
+		newAlertsSummaryQuery.data?.data.items.length ?? 0,
+	)
+	const newAlertsHasMore = $derived(
+		newAlertsSummaryQuery.data?.data.metadata.has_more ?? false,
 	)
 	const auditLogsTotal = $derived(
 		auditLogsSummaryQuery.data?.data.metadata.total ?? 0,
 	)
 	const agents = $derived(agentsQuery.data?.data.items ?? [])
-	const totalAgents = $derived(
-		agentsQuery.data?.data.metadata.total ?? agents.length,
-	)
+	const totalAgents = $derived(agents.length)
 	const onlineAgents = $derived(
 		agents.filter((agent) => agent.status === 'ONLINE').length,
 	)
@@ -179,12 +183,16 @@
 		},
 		{
 			label: 'Total Alerts',
-			value: formatNumber(alertsTotal),
+			value: alertsHasMore
+				? `${formatNumber(alertsTotal)}+`
+				: formatNumber(alertsTotal),
 			description: 'Detected alerts',
 		},
 		{
 			label: 'New Alerts',
-			value: formatNumber(newAlertsTotal),
+			value: newAlertsHasMore
+				? `${formatNumber(newAlertsTotal)}+`
+				: formatNumber(newAlertsTotal),
 			description: 'Needs triage',
 		},
 		{

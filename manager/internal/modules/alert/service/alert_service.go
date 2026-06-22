@@ -30,10 +30,10 @@ func NewAlertService(repo alertRepo.AlertRepository, auditSvc *auditService.Audi
 	return &AlertService{repo: repo, auditSvc: auditSvc, log: log}
 }
 
-func (s *AlertService) List(ctx context.Context, filter alertRepo.ListFilter) ([]*domain.Alert, int, error) {
+func (s *AlertService) List(ctx context.Context, filter alertRepo.ListFilter) ([]*domain.Alert, string, error) {
 	if filter.Status != "" {
 		if err := validateStatus(filter.Status); err != nil {
-			return nil, 0, err
+			return nil, "", err
 		}
 	}
 	return s.repo.List(ctx, filter)

@@ -21,18 +21,7 @@ func NewPgAlertRepository(db *pgxpool.Pool) AlertRepository {
 	return &pgAlertRepository{db: db}
 }
 
-func (r *pgAlertRepository) List(ctx context.Context, f ListFilter) ([]*domain.Alert, int, error) {
-	allowedCols := map[string]string{
-		"triggered_at": "a.triggered_at",
-		"severity":     "a.severity",
-		"status":       "a.status",
-		"created_at":   "a.created_at",
-	}
-	sortCol, ok := allowedCols[f.SortBy]
-	if !ok {
-		sortCol = "a.triggered_at"
-	}
-
+func (r *pgAlertRepository) List(ctx context.Context, f ListFilter) ([]*domain.Alert, string, error) {
 	direction := "DESC"
 	if strings.EqualFold(string(f.Order), "asc") {
 		direction = "ASC"
@@ -41,10 +30,6 @@ func (r *pgAlertRepository) List(ctx context.Context, f ListFilter) ([]*domain.A
 	limit := 10
 	if f.Limit > 0 {
 		limit = f.Limit
-	}
-	offset := 0
-	if f.Offset > 0 {
-		offset = f.Offset
 	}
 
 	args := []any{}
@@ -76,36 +61,42 @@ func (r *pgAlertRepository) List(ctx context.Context, f ListFilter) ([]*domain.A
 		conditions = append(conditions, fmt.Sprintf("a.triggered_at <= $%d", len(args)))
 	}
 
+	if f.Cursor != "" {
+		cur, err := DecodeCursor(f.Cursor)
+		if err != nil {
+			return nil, "", fmt.Errorf("list alerts: %w", err)
+		}
+		args = append(args, cur.TriggeredAt, cur.ID)
+		nTs, nID := len(args)-1, len(args)
+		op := "<"
+		if direction == "ASC" {
+			op = ">"
+		}
+		conditions = append(conditions,
+			fmt.Sprintf("(a.triggered_at, a.id) %s ($%d, $%d)", op, nTs, nID),
+		)
+	}
+
 	where := ""
 	if len(conditions) > 0 {
 		where = "WHERE " + strings.Join(conditions, " AND ")
 	}
 
-	countQ := fmt.Sprintf(`
-		SELECT COUNT(*)
-		FROM alerts a
-		LEFT JOIN rules r ON r.id = a.rule_id
-		%s
-	`, where)
-	var total int
-	if err := r.db.QueryRow(ctx, countQ, args...).Scan(&total); err != nil {
-		return nil, 0, err
-	}
+	args = append(args, limit)
+	nLimit := len(args)
 
-	args = append(args, limit, offset)
-	nLimit, nOffset := len(args)-1, len(args)
 	dataQ := fmt.Sprintf(`
 		SELECT a.id, a.rule_id, COALESCE(r.name, ''), a.severity, a.correlation_key, a.triggered_at, a.status, a.created_at
 		FROM alerts a
 		LEFT JOIN rules r ON r.id = a.rule_id
 		%s
-		ORDER BY %s %s
-		LIMIT $%d OFFSET $%d
-	`, where, sortCol, direction, nLimit, nOffset)
+		ORDER BY a.triggered_at %s, a.id %s
+		LIMIT $%d
+	`, where, direction, direction, nLimit)
 
 	rows, err := r.db.Query(ctx, dataQ, args...)
 	if err != nil {
-		return nil, 0, err
+		return nil, "", err
 	}
 	defer rows.Close()
 
@@ -113,15 +104,24 @@ func (r *pgAlertRepository) List(ctx context.Context, f ListFilter) ([]*domain.A
 	for rows.Next() {
 		alert, err := scanAlert(rows)
 		if err != nil {
-			return nil, 0, err
+			return nil, "", err
 		}
 		alerts = append(alerts, alert)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, 0, err
+		return nil, "", err
 	}
 
-	return alerts, total, nil
+	nextCursor := ""
+	if len(alerts) == limit {
+		last := alerts[len(alerts)-1]
+		nextCursor = EncodeCursor(PageCursor{
+			TriggeredAt: last.TriggeredAt,
+			ID:          last.ID,
+		})
+	}
+
+	return alerts, nextCursor, nil
 }
 
 func (r *pgAlertRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.AlertDetail, error) {

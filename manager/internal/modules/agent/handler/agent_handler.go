@@ -150,10 +150,9 @@ func (h *AgentHandler) CreateEnrollmentToken(c *gin.Context) {
 // Query params:
 //
 //	search    - case-insensitive partial match on name, hostname, ip_address
-//	sort_by   - field to sort by (name|hostname|status|created_at|last_seen_at|version); default: created_at
-//	order     - sort direction (asc|desc); default: asc
+//	order     - sort direction (asc|desc); default: desc
 //	limit     - max rows to return (1-100); default: 10
-//	offset    - rows to skip; default: 0
+//	cursor    - opaque keyset pagination token from previous response's next_cursor field
 func (h *AgentHandler) List(c *gin.Context) {
 	var q transport.ListAgentsQuery
 	if err := c.ShouldBindQuery(&q); err != nil {
@@ -161,26 +160,16 @@ func (h *AgentHandler) List(c *gin.Context) {
 		return
 	}
 
-	sortBy := q.SortBy
-	if q.Sort != "" {
-		sortBy = q.Sort
-	}
-	offset := q.Offset
-	if offset == 0 && q.Page > 1 {
-		offset = (q.Page - 1) * q.Limit
-	}
-
 	filter := agentRepo.ListFilter{
 		BaseFilter: query.BaseFilter{
 			Search: q.Search,
-			SortBy: sortBy,
 			Order:  query.SortOrder(q.Order),
 			Limit:  q.Limit,
-			Offset: offset,
 		},
+		Cursor: q.Cursor,
 	}
 
-	agents, total, err := h.svc.List(c.Request.Context(), filter)
+	agents, nextCursor, err := h.svc.List(c.Request.Context(), filter)
 	if err != nil {
 		h.log.WithError(err).Error("failed to list agents")
 		response.Write(c, http.StatusInternalServerError, "internal server error", nil)
@@ -192,18 +181,12 @@ func (h *AgentHandler) List(c *gin.Context) {
 		items = append(items, transport.ToAgentResponse(a))
 	}
 
-	totalPages := 0
-	if filter.Limit > 0 {
-		totalPages = (total + filter.Limit - 1) / filter.Limit
-	}
-
 	response.Write(c, http.StatusOK, "agents retrieved", transport.ListAgentsResponse{
 		Items: items,
 		Metadata: transport.ListAgentsMetadata{
-			Total:      total,
-			TotalPages: totalPages,
+			NextCursor: nextCursor,
+			HasMore:    nextCursor != "",
 			Limit:      filter.Limit,
-			Offset:     filter.Offset,
 		},
 	})
 }

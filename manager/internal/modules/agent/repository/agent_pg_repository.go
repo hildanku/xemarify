@@ -186,63 +186,61 @@ func (r *pgAgentRepository) GetByID(ctx context.Context, agentId uuid.UUID) (*do
 	return &a, nil
 }
 
-func (r *pgAgentRepository) List(ctx context.Context, filter ListFilter) ([]*domain.Agent, int, error) {
-	allowedCols := map[string]string{
-		"name":         "name",
-		"hostname":     "hostname",
-		"status":       "status",
-		"created_at":   "created_at",
-		"last_seen_at": "last_seen_at",
-		"version":      "version",
-	}
-	sortCol, ok := allowedCols[filter.SortBy]
-	if !ok {
-		sortCol = "created_at"
-	}
-
-	direction := "ASC"
-	if strings.EqualFold(string(filter.Order), "desc") {
-		direction = "DESC"
+func (r *pgAgentRepository) List(ctx context.Context, filter ListFilter) ([]*domain.Agent, string, error) {
+	direction := "DESC"
+	if strings.EqualFold(string(filter.Order), "asc") {
+		direction = "ASC"
 	}
 
 	limit := 10
 	if filter.Limit > 0 {
 		limit = filter.Limit
 	}
-	offset := 0
-	if filter.Offset > 0 {
-		offset = filter.Offset
-	}
 
-	// Build optional WHERE clause.
 	args := []any{}
-	whereClause := ""
+	conditions := []string{}
+
 	if filter.Search != "" {
 		args = append(args, "%"+filter.Search+"%")
-		whereClause = "WHERE (name ILIKE $1 OR hostname ILIKE $1 OR ip_address::text ILIKE $1)"
+		n := len(args)
+		conditions = append(conditions, fmt.Sprintf("(name ILIKE $%d OR hostname ILIKE $%d OR ip_address::text ILIKE $%d)", n, n, n))
 	}
 
-	// Total count (ignores limit/offset).
-	countQ := fmt.Sprintf("SELECT COUNT(*) FROM agents %s", whereClause)
-	var total int
-	if err := r.db.QueryRow(ctx, countQ, args...).Scan(&total); err != nil {
-		return nil, 0, err
+	if filter.Cursor != "" {
+		cur, err := DecodeCursor(filter.Cursor)
+		if err != nil {
+			return nil, "", fmt.Errorf("list agents: %w", err)
+		}
+		args = append(args, cur.CreatedAt, cur.ID)
+		nTs, nID := len(args)-1, len(args)
+		op := "<"
+		if direction == "ASC" {
+			op = ">"
+		}
+		conditions = append(conditions,
+			fmt.Sprintf("(created_at, id) %s ($%d, $%d)", op, nTs, nID),
+		)
 	}
 
-	// Paginated data query.
-	nextIdx := len(args) + 1
-	args = append(args, limit, offset)
+	where := ""
+	if len(conditions) > 0 {
+		where = "WHERE " + strings.Join(conditions, " AND ")
+	}
+
+	args = append(args, limit)
+	nLimit := len(args)
+
 	dataQ := fmt.Sprintf(`
 		SELECT id, name, hostname, key, ip_address::text, version, status, created_at, last_seen_at
 		FROM agents
 		%s
-		ORDER BY %s %s
-		LIMIT $%d OFFSET $%d
-	`, whereClause, sortCol, direction, nextIdx, nextIdx+1)
+		ORDER BY created_at %s, id %s
+		LIMIT $%d
+	`, where, direction, direction, nLimit)
 
 	rows, err := r.db.Query(ctx, dataQ, args...)
 	if err != nil {
-		return nil, 0, err
+		return nil, "", err
 	}
 	defer rows.Close()
 
@@ -263,7 +261,7 @@ func (r *pgAgentRepository) List(ctx context.Context, filter ListFilter) ([]*dom
 			&a.CreatedAt,
 			&lastSeenAt,
 		); err != nil {
-			return nil, 0, err
+			return nil, "", err
 		}
 
 		if ipAddress != nil {
@@ -273,10 +271,19 @@ func (r *pgAgentRepository) List(ctx context.Context, filter ListFilter) ([]*dom
 		agents = append(agents, &a)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, 0, err
+		return nil, "", err
 	}
 
-	return agents, total, nil
+	nextCursor := ""
+	if len(agents) == limit {
+		last := agents[len(agents)-1]
+		nextCursor = EncodeCursor(PageCursor{
+			CreatedAt: last.CreatedAt,
+			ID:        last.ID,
+		})
+	}
+
+	return agents, nextCursor, nil
 }
 
 func (r *pgAgentRepository) Create(ctx context.Context, a *domain.Agent) error {

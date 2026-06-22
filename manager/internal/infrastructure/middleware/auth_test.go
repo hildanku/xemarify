@@ -55,7 +55,7 @@ func (f *fakeAgentRepository) Update(context.Context, uuid.UUID, *domain.Agent) 
 func (f *fakeAgentRepository) GetByID(context.Context, uuid.UUID) (*domain.Agent, error) {
 	panic("unused")
 }
-func (f *fakeAgentRepository) List(context.Context, agentRepo.ListFilter) ([]*domain.Agent, int, error) {
+func (f *fakeAgentRepository) List(context.Context, agentRepo.ListFilter) ([]*domain.Agent, string, error) {
 	panic("unused")
 }
 func (f *fakeAgentRepository) Delete(context.Context, uuid.UUID) error {
