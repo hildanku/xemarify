@@ -30,7 +30,7 @@
 
 <Sidebar.Provider>
 	<AppSidebar />
-	<Sidebar.Inset>
+	<Sidebar.Inset class="min-w-0 overflow-x-hidden">
 		<header class="flex h-16 shrink-0 items-center gap-2 border-b bg-background">
 			<div class="flex w-full items-center justify-between px-4">
 				<div class="flex items-center gap-2">
