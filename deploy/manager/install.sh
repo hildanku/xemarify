@@ -3,7 +3,7 @@
 # Xemarify Manager - One-liner Installer
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/hildanku/xemarify/main/deploy/manager/install.sh | sudo bash
-#   curl -fsSL https://raw.githubusercontent.com/hildanku/xemarify/main/deploy/manager/install.sh | sudo VERSION=1.3.0-beta bash
+#   curl -fsSL https://raw.githubusercontent.com/hildanku/xemarify/main/deploy/manager/install.sh | sudo VERSION=1.6.0-beta bash
 #
 # Tested on: Ubuntu 22.04 LTS
 # ============================================================
