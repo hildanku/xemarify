@@ -6,13 +6,17 @@ import (
 	"errors"
 	"io"
 	"log"
+	"net"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/hildanku/xemarify-agent/internal/agent/model"
 )
+
+var authLogSourceIPPattern = regexp.MustCompile(`(?i)\b(?:from\s+|rhost=)([0-9a-f:.]+)\b`)
 
 // we need func for detect service like nginx or apache
 // we need guess the severity
@@ -25,13 +29,14 @@ func RunFileLog(
 	hostname string,
 	output chan<- model.IngestEvent,
 	pollInterval time.Duration,
+	webProbe WebProbeConfig,
 ) {
 	if pollInterval <= 0 {
 		pollInterval = 1 * time.Second
 	}
 
 	offsets := make(map[string]int64, len(paths))
-	for _, path := range paths {
+	for _, path := range expandFileLogPaths(paths) {
 		size, err := fileSize(path)
 		if err != nil {
 			if !errors.Is(err, os.ErrNotExist) {
@@ -52,7 +57,12 @@ func RunFileLog(
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			for _, path := range paths {
+			for _, path := range expandFileLogPaths(paths) {
+				if _, known := offsets[path]; !known {
+					// A path created after startup (such as a daily application log)
+					// starts at offset zero so its first security event is retained.
+					offsets[path] = 0
+				}
 				lines, newOffset, err := readNewLines(path, offsets[path])
 				if err != nil {
 					if !errors.Is(err, os.ErrNotExist) {
@@ -63,6 +73,7 @@ func RunFileLog(
 
 				offsets[path] = newOffset
 				service := detectService(path)
+				category := categoryForService(service)
 
 				for _, line := range lines {
 					msg := strings.TrimSpace(line)
@@ -79,26 +90,50 @@ func RunFileLog(
 						"service":     service,
 						"severity":    severity,
 					}
+					normalized := map[string]interface{}{
+						"source_type": "filelog",
+						"source_name": sourceName,
+						"file_path":   path,
+						"service":     service,
+						"severity":    severity,
+					}
+					if service == "auth" {
+						if sourceIP := authLogSourceIP(msg); sourceIP != "" {
+							normalized["source_ip"] = sourceIP
+						}
+					}
+					if service == "nginx" && webProbe.Enabled {
+						if probe, ok := parseWebProbe(msg, hostname, webProbe.SensitivePaths); ok {
+							for key, value := range probe {
+								normalized[key] = value
+							}
+							severity = "MEDIUM"
+						}
+					}
+					attributes["severity"] = severity
+					normalized["severity"] = severity
+					if sourceIP, ok := normalized["source_ip"].(string); ok {
+						// SourceIP is duplicated at the top level because rule grouping
+						// prefers it over normalized.source_ip.
+						attributes["source_ip"] = sourceIP
+					}
+
 					event := model.IngestEvent{
 						EventTime:  time.Now().UTC(),
 						Hostname:   hostname,
-						SourceIP:   "",
 						InputType:  "filelog",
 						SourceName: sourceName,
 						Facility:   service,
 						Severity:   severity,
-						Category:   "web_log",
+						Category:   category,
 						Message:    msg,
 						Raw:        msg,
 						Attributes: attributes,
-						Normalized: map[string]interface{}{
-							"event_type":  "filelog",
-							"source_type": "filelog",
-							"source_name": sourceName,
-							"file_path":   path,
-							"service":     service,
-							"severity":    severity,
-						},
+						SourceIP: func() string {
+							value, _ := normalized["source_ip"].(string)
+							return value
+						}(),
+						Normalized: normalized,
 					}
 
 					select {
@@ -112,6 +147,29 @@ func RunFileLog(
 			}
 		}
 	}
+}
+
+func expandFileLogPaths(patterns []string) []string {
+	paths := make([]string, 0, len(patterns))
+	seen := make(map[string]struct{})
+	for _, pattern := range patterns {
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			log.Printf("filelog invalid path pattern=%s: %v", pattern, err)
+			continue
+		}
+		if len(matches) == 0 && !strings.ContainsAny(pattern, "*?[") {
+			matches = []string{pattern}
+		}
+		for _, path := range matches {
+			if _, exists := seen[path]; exists {
+				continue
+			}
+			seen[path] = struct{}{}
+			paths = append(paths, path)
+		}
+	}
+	return paths
 }
 
 func readNewLines(path string, offset int64) ([]string, int64, error) {
@@ -170,9 +228,30 @@ func detectService(path string) string {
 		return "nginx"
 	case strings.Contains(lower, "apache"):
 		return "apache"
+	case strings.HasSuffix(lower, "/auth.log"), strings.HasSuffix(lower, "/secure"):
+		return "auth"
 	default:
 		return "unknown"
 	}
+}
+
+func categoryForService(service string) string {
+	switch service {
+	case "nginx", "apache":
+		return "web_log"
+	case "auth":
+		return "auth_log"
+	default:
+		return "file_log"
+	}
+}
+
+func authLogSourceIP(message string) string {
+	match := authLogSourceIPPattern.FindStringSubmatch(message)
+	if len(match) != 2 || net.ParseIP(match[1]) == nil {
+		return ""
+	}
+	return match[1]
 }
 
 func guessSeverity(message string) string {

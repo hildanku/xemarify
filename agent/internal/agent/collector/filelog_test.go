@@ -20,6 +20,7 @@ func TestDetectService(t *testing.T) {
 	}{
 		{name: "nginx path", path: "/var/log/nginx/access.log", want: "nginx"},
 		{name: "apache path", path: "/var/log/apache2/error.log", want: "apache"},
+		{name: "auth log path", path: "/var/log/auth.log", want: "auth"},
 		{name: "unknown path", path: "/tmp/custom.log", want: "unknown"},
 	}
 
@@ -29,6 +30,29 @@ func TestDetectService(t *testing.T) {
 			got := detectService(testCase.path)
 			if got != testCase.want {
 				t.Fatalf("detectService(%q) = %q, want %q", testCase.path, got, testCase.want)
+			}
+		})
+	}
+}
+
+func TestAuthLogSourceIP(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		line string
+		want string
+	}{
+		{name: "failed password", line: "sshd[1]: Failed password for root from 127.0.0.1 port 22 ssh2", want: "127.0.0.1"},
+		{name: "pam auth failure", line: "sshd[1]: pam_unix(sshd:auth): authentication failure rhost=2001:db8::10 user=root", want: "2001:db8::10"},
+		{name: "no source IP", line: "sshd[1]: Connection closed by user root", want: ""},
+	}
+
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			if got := authLogSourceIP(testCase.line); got != testCase.want {
+				t.Fatalf("authLogSourceIP(%q) = %q, want %q", testCase.line, got, testCase.want)
 			}
 		})
 	}
@@ -127,6 +151,22 @@ func TestReadNewLines_TruncateResetsOffset(t *testing.T) {
 	}
 }
 
+func TestExpandFileLogPaths(t *testing.T) {
+	tempDir := t.TempDir()
+	first := filepath.Join(tempDir, "log-2026-07-29.php")
+	second := filepath.Join(tempDir, "log-2026-07-30.php")
+	for _, path := range []string{first, second} {
+		if err := os.WriteFile(path, nil, 0o600); err != nil {
+			t.Fatalf("create %s: %v", path, err)
+		}
+	}
+
+	paths := expandFileLogPaths([]string{filepath.Join(tempDir, "log-*.php")})
+	if len(paths) != 2 {
+		t.Fatalf("expanded paths = %#v, want two matches", paths)
+	}
+}
+
 func TestRunFileLog_EmitsOnlyNewLines(t *testing.T) {
 	tempDir := t.TempDir()
 	logPath := filepath.Join(tempDir, "nginx-access.log")
@@ -139,7 +179,7 @@ func TestRunFileLog_EmitsOnlyNewLines(t *testing.T) {
 	defer cancel()
 
 	output := make(chan model.IngestEvent, 16)
-	go RunFileLog(ctx, []string{logPath}, "test-host", output, 20*time.Millisecond)
+	go RunFileLog(ctx, []string{logPath}, "test-host", output, 20*time.Millisecond, WebProbeConfig{})
 
 	time.Sleep(40 * time.Millisecond)
 
@@ -181,9 +221,53 @@ func TestRunFileLog_EmitsOnlyNewLines(t *testing.T) {
 		if event.Message != "WARN new-line" {
 			t.Fatalf("unexpected message: %s", event.Message)
 		}
+		if _, ok := event.Normalized["event_type"]; ok {
+			t.Fatalf("raw filelog must not set event_type: %#v", event.Normalized)
+		}
 	case <-time.After(800 * time.Millisecond):
 		t.Fatal("timed out waiting for filelog event")
 	}
 
 	cancel()
+}
+
+func TestRunFileLog_ParsesAuthLogSourceIP(t *testing.T) {
+	tempDir := t.TempDir()
+	logPath := filepath.Join(tempDir, "auth.log")
+	if err := os.WriteFile(logPath, nil, 0o600); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	output := make(chan model.IngestEvent, 1)
+	go RunFileLog(ctx, []string{logPath}, "test-host", output, 20*time.Millisecond, WebProbeConfig{})
+	time.Sleep(40 * time.Millisecond)
+
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatalf("open append: %v", err)
+	}
+	if _, err := f.WriteString("sshd[1]: Failed password for root from 127.0.0.1 port 22 ssh2\n"); err != nil {
+		_ = f.Close()
+		t.Fatalf("append auth event: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	select {
+	case event := <-output:
+		if event.Facility != "auth" || event.Category != "auth_log" {
+			t.Fatalf("facility/category = %q/%q, want auth/auth_log", event.Facility, event.Category)
+		}
+		if event.SourceIP != "127.0.0.1" {
+			t.Fatalf("source_ip = %q, want 127.0.0.1", event.SourceIP)
+		}
+		if event.Normalized["source_ip"] != "127.0.0.1" {
+			t.Fatalf("normalized.source_ip = %#v", event.Normalized["source_ip"])
+		}
+	case <-time.After(800 * time.Millisecond):
+		t.Fatal("timed out waiting for auth log event")
+	}
 }

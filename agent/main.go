@@ -114,7 +114,10 @@ func main() {
 	go collector.RunSyslogUDP(ctx, cfg.Syslog.Listen, agentHostname, eventCh)
 
 	if cfg.FileLog.Enabled && len(cfg.FileLog.Paths) > 0 {
-		go collector.RunFileLog(ctx, cfg.FileLog.Paths, agentHostname, eventCh, cfg.FileLog.PollInterval)
+		go collector.RunFileLog(ctx, cfg.FileLog.Paths, agentHostname, eventCh, cfg.FileLog.PollInterval, collector.WebProbeConfig{
+			Enabled:        cfg.FileLog.WebProbe.Enabled,
+			SensitivePaths: cfg.FileLog.WebProbe.SensitivePaths,
+		})
 	}
 
 	if cfg.Inventory.Enabled {
@@ -122,11 +125,13 @@ func main() {
 	}
 
 	log.Printf(
-		"xemarify-agent started: endpoint=%s syslog_listen=%s filelog_enabled=%t filelog_paths=%d inventory_enabled=%t inventory_interval=%s disk_buffer_path=%s disk_buffer_max_bytes=%d",
+		"xemarify-agent started: endpoint=%s syslog_listen=%s filelog_enabled=%t filelog_paths=%d web_probe_enabled=%t web_probe_sensitive_paths=%d inventory_enabled=%t inventory_interval=%s disk_buffer_path=%s disk_buffer_max_bytes=%d",
 		cfg.Server.Endpoint,
 		cfg.Syslog.Listen,
 		cfg.FileLog.Enabled,
 		len(cfg.FileLog.Paths),
+		cfg.FileLog.WebProbe.Enabled,
+		len(cfg.FileLog.WebProbe.SensitivePaths),
 		cfg.Inventory.Enabled,
 		cfg.Inventory.Interval,
 		cfg.DiskBuffer.Path,

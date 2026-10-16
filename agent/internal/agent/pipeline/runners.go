@@ -11,6 +11,8 @@ import (
 	"github.com/hildanku/xemarify-agent/internal/agent/model"
 )
 
+// RunIngestor drains the input channel and pushes each event into the queue.
+// Stops when ctx is cancelled.
 func RunIngestor(ctx context.Context, input <-chan model.IngestEvent, queue EventQueue) {
 	for {
 		select {
@@ -22,6 +24,9 @@ func RunIngestor(ctx context.Context, input <-chan model.IngestEvent, queue Even
 	}
 }
 
+// RunSender flushes ready batches from the queue to the events endpoint on a ticker.
+// On send failure, items are nack'd back with retry backoff.
+// On ctx cancel, one final flush is attempted before exit.
 func RunSender(
 	ctx context.Context,
 	client *http.Client,
@@ -45,6 +50,7 @@ func RunSender(
 				return
 			}
 
+			// Separate IDs and events for the batch payload.
 			ids := make([]uint64, 0, len(items))
 			events := make([]model.IngestEvent, 0, len(items))
 			for _, item := range items {
@@ -58,6 +64,7 @@ func RunSender(
 			}
 
 			if err := apiclient.PostJSON(ctx, client, apiclient.JoinURL(endpoint, "/api/v1/events"), agentSecret, payload, http.StatusAccepted); err != nil {
+				// Send failed; return items to queue with backoff delay.
 				queue.Nack(ids, now, retry)
 				log.Printf("event send failed (%d events, queue=%d): %v", len(items), queue.Len(), err)
 				return
@@ -66,17 +73,19 @@ func RunSender(
 			queue.Ack(ids)
 			eventsDelivered.Add(int64(len(items)))
 
+			// Batch smaller than limit means no more ready items.
 			if len(items) < batchSize {
 				return
 			}
 		}
 	}
 
+	// Flush once immediately on start, then on every tick.
 	flush()
 	for {
 		select {
 		case <-ctx.Done():
-			flush()
+			flush() // drain remaining items before shutdown
 			return
 		case <-ticker.C:
 			flush()
@@ -84,6 +93,8 @@ func RunSender(
 	}
 }
 
+// RunHeartbeat sends periodic heartbeats with uptime and delivered event count.
+// Sends once immediately on start, then on every interval tick.
 func RunHeartbeat(
 	ctx context.Context,
 	client *http.Client,

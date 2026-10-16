@@ -12,15 +12,18 @@ import (
 	"github.com/hildanku/xemarify-agent/internal/agent/model"
 )
 
+// RetryPolicy computes wait duration before retrying a failed item.
 type RetryPolicy interface {
 	NextDelay(attempt int) time.Duration
 }
 
+// ExponentialBackoffPolicy doubles delay each attempt, capped at MaxDelay.
 type ExponentialBackoffPolicy struct {
 	BaseDelay time.Duration
 	MaxDelay  time.Duration
 }
 
+// NextDelay returns the backoff duration for a given attempt number.
 func (p ExponentialBackoffPolicy) NextDelay(attempt int) time.Duration {
 	if attempt <= 0 {
 		attempt = 1
@@ -41,32 +44,39 @@ func (p ExponentialBackoffPolicy) NextDelay(attempt int) time.Duration {
 	return delay
 }
 
+// QueueItem is the public view of a dequeued event, exposed to the sender.
 type QueueItem struct {
 	ID      uint64
 	Event   model.IngestEvent
 	Attempt int
 }
 
+// EventQueue is the interface both MemoryQueue and DiskBackedQueue satisfy.
 type EventQueue interface {
 	Enqueue(event model.IngestEvent)
+	// DequeueReadyBatch moves up to limit items whose readyAt <= now into in-flight state.
 	DequeueReadyBatch(now time.Time, limit int) []QueueItem
+	// Ack removes successfully delivered items from in-flight.
 	Ack(ids []uint64)
+	// Nack returns failed items to pending with a new readyAt based on retry policy.
 	Nack(ids []uint64, now time.Time, retry RetryPolicy)
 	Len() int
 }
 
+// queuedEvent is the internal queue entry with scheduling metadata.
 type queuedEvent struct {
 	id      uint64
 	event   model.IngestEvent
 	attempt int
-	readyAt time.Time
+	readyAt time.Time // earliest time this item can be dequeued
 }
 
+// MemoryQueue is a non-persistent in-memory queue. Data is lost on restart.
 type MemoryQueue struct {
 	mu       sync.Mutex
 	nextID   uint64
 	pending  []*queuedEvent
-	inFlight map[uint64]*queuedEvent
+	inFlight map[uint64]*queuedEvent // items currently being sent
 }
 
 func NewMemoryQueue() *MemoryQueue {
@@ -89,6 +99,7 @@ func (q *MemoryQueue) Enqueue(event model.IngestEvent) {
 	})
 }
 
+// DequeueReadyBatch picks items ready by now, moves them to in-flight, returns up to limit.
 func (q *MemoryQueue) DequeueReadyBatch(now time.Time, limit int) []QueueItem {
 	if limit <= 0 {
 		return nil
@@ -106,6 +117,7 @@ func (q *MemoryQueue) DequeueReadyBatch(now time.Time, limit int) []QueueItem {
 			continue
 		}
 
+		// Skip items not yet ready (backoff delay not elapsed).
 		if item.readyAt.After(now) {
 			remaining = append(remaining, item)
 			continue
@@ -123,6 +135,7 @@ func (q *MemoryQueue) DequeueReadyBatch(now time.Time, limit int) []QueueItem {
 	return items
 }
 
+// Ack drops successfully delivered items from in-flight.
 func (q *MemoryQueue) Ack(ids []uint64) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -132,6 +145,7 @@ func (q *MemoryQueue) Ack(ids []uint64) {
 	}
 }
 
+// Nack returns failed items to pending with incremented attempt and new readyAt.
 func (q *MemoryQueue) Nack(ids []uint64, now time.Time, retry RetryPolicy) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -149,6 +163,7 @@ func (q *MemoryQueue) Nack(ids []uint64, now time.Time, retry RetryPolicy) {
 	}
 }
 
+// Len returns total count of pending + in-flight items.
 func (q *MemoryQueue) Len() int {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -156,30 +171,35 @@ func (q *MemoryQueue) Len() int {
 	return len(q.pending) + len(q.inFlight)
 }
 
+// queueSnapshot is the JSON structure persisted to disk.
 type queueSnapshot struct {
 	NextID uint64              `json:"next_id"`
 	Items  []queueSnapshotItem `json:"items"`
 }
 
+// queueSnapshotItem serializes a single queued event including its in-flight state.
 type queueSnapshotItem struct {
 	ID       uint64            `json:"id"`
 	Event    model.IngestEvent `json:"event"`
 	Attempt  int               `json:"attempt"`
 	ReadyAt  time.Time         `json:"ready_at"`
-	InFlight bool              `json:"in_flight"`
+	InFlight bool              `json:"in_flight"` // if true, readyAt is reset to now on load
 }
 
+// DiskBackedQueue persists the queue to a JSON file after every mutation.
+// Enqueue blocks when usedSize would exceed maxBytes until space is freed by Ack.
 type DiskBackedQueue struct {
 	mu       sync.Mutex
-	cond     *sync.Cond
+	cond     *sync.Cond // signals waiters in Enqueue when space is freed
 	path     string
 	maxBytes int64
 	nextID   uint64
 	pending  []*queuedEvent
 	inFlight map[uint64]*queuedEvent
-	usedSize int64
+	usedSize int64 // total JSON-encoded size of all tracked events
 }
 
+// NewDiskBackedQueue creates a queue backed by path, loading any existing snapshot.
 func NewDiskBackedQueue(path string, maxBytes int64) (*DiskBackedQueue, error) {
 	if path == "" {
 		return nil, errors.New("disk buffer path is required")
@@ -205,6 +225,7 @@ func NewDiskBackedQueue(path string, maxBytes int64) (*DiskBackedQueue, error) {
 		return nil, err
 	}
 
+	// Write initial snapshot to verify the file is writable.
 	if err := q.persistLocked(); err != nil {
 		return nil, err
 	}
@@ -212,6 +233,8 @@ func NewDiskBackedQueue(path string, maxBytes int64) (*DiskBackedQueue, error) {
 	return q, nil
 }
 
+// Enqueue adds an event to the queue. Blocks if the buffer is full until space is freed.
+// Drops events that exceed maxBytes on their own.
 func (q *DiskBackedQueue) Enqueue(event model.IngestEvent) {
 	eventSize := encodedEventSize(event)
 	if eventSize > q.maxBytes {
@@ -222,6 +245,7 @@ func (q *DiskBackedQueue) Enqueue(event model.IngestEvent) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
+	// Wait until there's enough space for this event.
 	for q.usedSize+eventSize > q.maxBytes {
 		q.cond.Wait()
 	}
@@ -240,6 +264,7 @@ func (q *DiskBackedQueue) Enqueue(event model.IngestEvent) {
 	}
 }
 
+// DequeueReadyBatch picks items ready by now, moves them to in-flight, persists state.
 func (q *DiskBackedQueue) DequeueReadyBatch(now time.Time, limit int) []QueueItem {
 	if limit <= 0 {
 		return nil
@@ -257,6 +282,7 @@ func (q *DiskBackedQueue) DequeueReadyBatch(now time.Time, limit int) []QueueIte
 			continue
 		}
 
+		// Skip items still under backoff.
 		if item.readyAt.After(now) {
 			remaining = append(remaining, item)
 			continue
@@ -281,6 +307,7 @@ func (q *DiskBackedQueue) DequeueReadyBatch(now time.Time, limit int) []QueueIte
 	return items
 }
 
+// Ack removes delivered items, frees their byte budget, wakes blocked Enqueue callers.
 func (q *DiskBackedQueue) Ack(ids []uint64) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -307,11 +334,13 @@ func (q *DiskBackedQueue) Ack(ids []uint64) {
 		}
 	}
 
+	// Wake any Enqueue callers waiting for space.
 	if released > 0 {
 		q.cond.Broadcast()
 	}
 }
 
+// Nack returns failed items to pending with incremented attempt and backoff readyAt.
 func (q *DiskBackedQueue) Nack(ids []uint64, now time.Time, retry RetryPolicy) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -337,6 +366,7 @@ func (q *DiskBackedQueue) Nack(ids []uint64, now time.Time, retry RetryPolicy) {
 	}
 }
 
+// Len returns total count of pending + in-flight items.
 func (q *DiskBackedQueue) Len() int {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -344,6 +374,8 @@ func (q *DiskBackedQueue) Len() int {
 	return len(q.pending) + len(q.inFlight)
 }
 
+// load reads and deserializes the snapshot file into queue state.
+// In-flight items from a prior run are reset to readyAt=now (immediate retry).
 func (q *DiskBackedQueue) load() error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -351,6 +383,7 @@ func (q *DiskBackedQueue) load() error {
 	data, err := os.ReadFile(q.path)
 	if err != nil {
 		if os.IsNotExist(err) {
+			// Fresh start; initialize empty state.
 			q.nextID = 0
 			q.pending = make([]*queuedEvent, 0, 1024)
 			q.inFlight = make(map[uint64]*queuedEvent)
@@ -387,6 +420,7 @@ func (q *DiskBackedQueue) load() error {
 			readyAt: item.ReadyAt,
 		}
 
+		// Items that were in-flight when the process died are retried immediately.
 		if item.InFlight {
 			queued.readyAt = now
 		}
@@ -398,6 +432,8 @@ func (q *DiskBackedQueue) load() error {
 	return nil
 }
 
+// persistLocked serializes full queue state to disk atomically.
+// Must be called with q.mu held.
 func (q *DiskBackedQueue) persistLocked() error {
 	snapshot := queueSnapshot{
 		NextID: q.nextID,
@@ -432,6 +468,8 @@ func (q *DiskBackedQueue) persistLocked() error {
 	return writeAtomicSynced(q.path, data)
 }
 
+// writeAtomicSynced writes data to path via a temp file + rename to avoid partial writes.
+// Both the file and its parent directory are fsynced for crash safety.
 func writeAtomicSynced(path string, data []byte) error {
 	tmpPath := path + ".tmp"
 
@@ -454,10 +492,12 @@ func writeAtomicSynced(path string, data []byte) error {
 		return err
 	}
 
+	// Atomic swap: rename is guaranteed to be atomic on POSIX.
 	if err := os.Rename(tmpPath, path); err != nil {
 		return err
 	}
 
+	// Fsync the directory so the rename is durable.
 	dir, err := os.Open(filepath.Dir(path))
 	if err != nil {
 		return err
@@ -467,6 +507,7 @@ func writeAtomicSynced(path string, data []byte) error {
 	return dir.Sync()
 }
 
+// encodedEventSize returns JSON byte size of event, used for buffer accounting.
 func encodedEventSize(event model.IngestEvent) int64 {
 	b, err := json.Marshal(event)
 	if err != nil {

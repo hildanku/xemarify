@@ -29,6 +29,10 @@ type Config struct {
 		Enabled      bool          `yaml:"enabled"`
 		Paths        []string      `yaml:"paths"`
 		PollInterval time.Duration `yaml:"poll_interval"`
+		WebProbe     struct {
+			Enabled        bool     `yaml:"enabled"`
+			SensitivePaths []string `yaml:"sensitive_paths"`
+		} `yaml:"web_probe"`
 	} `yaml:"filelog"`
 	Inventory struct {
 		Enabled  bool          `yaml:"enabled"`
