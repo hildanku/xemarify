@@ -21,6 +21,15 @@ syslog:
 filelog:
   enabled: true
   poll_interval: 5s
+  web_probe:
+    enabled: false
+    sensitive_paths:
+      # Enable only after tailoring this list to the deployed web application.
+      - /admin
+      - /administrator
+      - /wp-admin
+      - /phpmyadmin
+      - /.env
   paths:
     - /var/log/syslog
     - /var/log/auth.log

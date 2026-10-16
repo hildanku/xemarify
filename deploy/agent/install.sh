@@ -135,6 +135,16 @@ syslog:
 filelog:
   enabled: true
   poll_interval: 5s
+  web_probe:
+    # Keep path-probe classification opt-in until paths are tailored to the
+    # deployed application.
+    enabled: false
+    sensitive_paths:
+      - /.env
+      - /admin
+      - /wp-admin
+      - /phpmyadmin
+      - /config.php
   paths:
     - /var/log/syslog
     - /var/log/auth.log

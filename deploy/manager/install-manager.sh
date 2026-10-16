@@ -6,7 +6,7 @@ set -euo pipefail
 # Tested on: Ubuntu 22.04 LTS
 # Usage:
 #   sudo ./install-manager.sh
-#   sudo ./install-manager.sh --manager-version v1.0.2-beta --web-version v1.0.1-beta
+#   sudo ./install-manager.sh --manager-version v1.2.0-beta --web-version v1.2.0-beta
 #
 # Prerequisites:
 #   - docker login ghcr.io
@@ -15,7 +15,7 @@ set -euo pipefail
 MANAGER_VERSION="${MANAGER_VERSION:-latest}"
 WEB_VERSION="${WEB_VERSION:-latest}"
 MANAGER_PORT="${MANAGER_PORT:-8089}"
-WEB_PORT="${WEB_PORT:-3000}"
+HTTP_PORT="${HTTP_PORT:-80}"
 INSTALL_DIR="${INSTALL_DIR:-/opt/xemarify}"
 
 # GHCR image paths
@@ -41,12 +41,12 @@ Options:
   --manager-version <tag>  Manager image tag (default: ${MANAGER_VERSION})
   --web-version <tag>      Web image tag (default: ${WEB_VERSION})
   --manager-port <port>    Manager API port (default: ${MANAGER_PORT})
-  --web-port <port>        Web dashboard port (default: ${WEB_PORT})
+  --http-port <port>       HTTP port for nginx (default: ${HTTP_PORT})
   --install-dir <path>     Installation directory (default: ${INSTALL_DIR})
   -h, --help               Show this help
 
 Env alternatives:
-  MANAGER_VERSION, WEB_VERSION, MANAGER_PORT, WEB_PORT, INSTALL_DIR
+  MANAGER_VERSION, WEB_VERSION, MANAGER_PORT, HTTP_PORT, INSTALL_DIR
 
 Prerequisites:
   Run 'docker login ghcr.io' before executing this script.
@@ -58,7 +58,7 @@ while [[ $# -gt 0 ]]; do
     --manager-version) MANAGER_VERSION="$2"; shift 2 ;;
     --web-version)     WEB_VERSION="$2"; shift 2 ;;
     --manager-port)    MANAGER_PORT="$2"; shift 2 ;;
-    --web-port)        WEB_PORT="$2"; shift 2 ;;
+    --http-port)       HTTP_PORT="$2"; shift 2 ;;
     --install-dir)     INSTALL_DIR="$2"; shift 2 ;;
     -h|--help)         usage; exit 0 ;;
     *) err "Unknown option: $1"; usage; exit 1 ;;
@@ -98,14 +98,10 @@ Signed-By: /etc/apt/keyrings/docker.asc
 EOF
 
   apt-get update -qq
-  apt-get install -y -qq  docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
-  systemctl status docker
+  systemctl enable --now docker
   log "Docker installed successfully."
-
-  groupadd docker
-  usermod -aG docker $USER
-  newgrp docker
 }
 
 
@@ -150,7 +146,7 @@ generate_env() {
   local SETUP_TOKEN
   SETUP_TOKEN="$(gen_token)"
 
-  # Detect public IP for VITE_API_BASE_URL
+  # Detect public IP
   local PUBLIC_IP
   PUBLIC_IP="$(curl -s -4 ifconfig.me || echo "localhost")"
 
@@ -161,13 +157,13 @@ POSTGRES_PASSWORD=${DB_PASSWORD}
 POSTGRES_DB=xemarify
 
 MANAGER_PORT=${MANAGER_PORT}
-WEB_PORT=${WEB_PORT}
+HTTP_PORT=${HTTP_PORT}
 
 MANAGER_IMAGE=${IMAGE_MANAGER}:${MANAGER_VERSION}
 WEB_IMAGE=${IMAGE_WEB}:${WEB_VERSION}
 
-VITE_API_BASE_URL=http://${PUBLIC_IP}:${MANAGER_PORT}
-WEB_ORIGIN=http://${PUBLIC_IP}:${WEB_PORT}
+# Public origin for SvelteKit CSRF protection
+WEB_ORIGIN=http://${PUBLIC_IP}:${HTTP_PORT}
 EOF
 
   cat > "${MANAGER_ENV}" <<EOF
@@ -200,8 +196,8 @@ EOF
   echo "  PUBLIC IP:    ${PUBLIC_IP}"
   echo "  SETUP TOKEN:  ${SETUP_TOKEN}"
   echo "=========================================="
-  echo "  Dashboard:    http://${PUBLIC_IP}:${WEB_PORT}"
-  echo "  Manager API:  http://${PUBLIC_IP}:${MANAGER_PORT}"
+  echo "  Dashboard:    http://${PUBLIC_IP}:${HTTP_PORT}"
+  echo "  Manager API:  http://${PUBLIC_IP}:${MANAGER_PORT} (direct, for agents)"
   echo ""
   echo "  Open the dashboard and use the setup token"
   echo "  to create your first manager account."
@@ -210,7 +206,65 @@ EOF
 }
 
 
-# 5. Write docker-compose.yml
+# 5. Write nginx config
+
+write_nginx_conf() {
+  mkdir -p "${INSTALL_DIR}/nginx"
+
+  cat > "${INSTALL_DIR}/nginx/nginx.conf" <<'NGINX'
+upstream manager_backend {
+    server manager:8089;
+}
+
+upstream web_backend {
+    server web:3000;
+}
+
+server {
+    listen 80;
+    server_name _;
+
+    # Security headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    # Request size limit (for event ingestion)
+    client_max_body_size 10m;
+
+    # All API routes -> Manager
+    location /api/ {
+        proxy_pass http://manager_backend;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # SSE support (events/stream)
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 300s;
+    }
+
+    # Everything else -> SvelteKit
+    location / {
+        proxy_pass http://web_backend;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+NGINX
+
+  log "nginx.conf written to ${INSTALL_DIR}/nginx/"
+}
+
+
+# 6. Write docker-compose.yml
 
 write_compose() {
   local COMPOSE_FILE="${INSTALL_DIR}/docker-compose.yml"
@@ -297,7 +351,7 @@ services:
     ports:
       - "${MANAGER_PORT}:8089"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8089/health >/dev/null"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8089/api/health >/dev/null"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -316,14 +370,33 @@ services:
       HOST: 0.0.0.0
       PORT: 3000
       ORIGIN: ${WEB_ORIGIN}
-    ports:
-      - "${WEB_PORT}:3000"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000 >/dev/null"]
       interval: 10s
       timeout: 3s
       retries: 5
       start_period: 15s
+    networks:
+      - xemarify
+
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy
+      manager:
+        condition: service_healthy
+    ports:
+      - "${HTTP_PORT}:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/api/health >/dev/null"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
     networks:
       - xemarify
 
@@ -340,7 +413,7 @@ COMPOSE
 }
 
 
-# 6. Start the stack
+# 7. Start the stack
 
 start_stack() {
   log "Starting Xemarify stack..."
@@ -352,14 +425,9 @@ start_stack() {
   local max_retries=30
 
   while [[ $retries -lt $max_retries ]]; do
-    if docker compose ps --format json | grep -q '"Health":"healthy"' 2>/dev/null || \
-       docker compose ps | grep -q "(healthy)" 2>/dev/null; then
-
-      # Check if manager specifically is healthy
-      if docker compose ps manager | grep -q "healthy"; then
-        log "Manager is healthy!"
-        break
-      fi
+    if docker compose ps nginx 2>/dev/null | grep -q "healthy"; then
+      log "Nginx is healthy!"
+      break
     fi
 
     retries=$((retries + 1))
@@ -389,9 +457,9 @@ start_stack() {
 setup_firewall() {
   if command -v ufw >/dev/null 2>&1; then
     log "Configuring UFW firewall..."
+    ufw allow "${HTTP_PORT}/tcp" >/dev/null 2>&1 || true
     ufw allow "${MANAGER_PORT}/tcp" >/dev/null 2>&1 || true
-    ufw allow "${WEB_PORT}/tcp" >/dev/null 2>&1 || true
-    log "Ports ${MANAGER_PORT} and ${WEB_PORT} opened."
+    log "Ports ${HTTP_PORT} and ${MANAGER_PORT} opened."
   fi
 }
 
@@ -409,6 +477,7 @@ main() {
   install_docker
   check_ghcr_login
   generate_env
+  write_nginx_conf
   write_compose
   setup_firewall
   start_stack

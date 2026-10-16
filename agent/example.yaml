@@ -21,6 +21,17 @@ syslog:
 filelog:
   enabled: true
   poll_interval: 5s
+  # Classify requests to these endpoints from Nginx access logs as
+  # web_probe_admin_path. Keep this opt-in and list only paths relevant to
+  # the protected application.
+  web_probe:
+    enabled: true
+    sensitive_paths:
+      - /admin
+      - /administrator
+      - /wp-admin
+      - /phpmyadmin
+      - /.env
   paths:
     - /var/log/nginx/access.log
     - /var/log/nginx/error.log
